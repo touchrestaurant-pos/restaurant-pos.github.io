@@ -79,3 +79,13 @@ jobs:
         with:
           name: restaurant-pos-windows
           path: build/windows/x64/runner/Release
+      - name: Build the installer (Inno Setup)
+        shell: bash
+        run: |
+          export APP_VERSION=$(grep -oP "appVersion = '\K[^']+" lib/config.dart)
+          echo "Version $APP_VERSION"
+          "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" branding/windows/installer.iss || (choco install innosetup -y --no-progress && "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" branding/windows/installer.iss)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: restaurant-pos-windows-installer
+          path: build/installer/*.exe

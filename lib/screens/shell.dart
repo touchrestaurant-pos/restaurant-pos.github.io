@@ -19,10 +19,13 @@ import 'staff_screen.dart';
 import 'stock_screen.dart';
 
 class _Tab {
-  const _Tab(this.label, this.icon, this.build);
+  const _Tab(this.label, this.icon, this.build, [this.group = '']);
   final String label;
   final IconData icon;
   final Widget Function() build;
+
+  /// Heading the tab sits under in the side menu.
+  final String group;
 }
 
 const _roleNames = {
@@ -45,17 +48,17 @@ class _ShellState extends State<Shell> {
   int _index = 0;
 
   List<_Tab> _tabsFor(String role) {
-    const order = _Tab('Order', Icons.point_of_sale, _cashier);
-    const kitchen = _Tab('Kitchen', Icons.soup_kitchen, _kitchen);
-    const dash = _Tab('Dashboard', Icons.dashboard_outlined, _dashboard);
-    const staff = _Tab('Staff', Icons.badge_outlined, _staff);
-    const requests = _Tab('Requests', Icons.edit_note, _requests);
-    const orders = _Tab('Orders', Icons.receipt_long, _orders);
-    const cashup = _Tab('Cash-up', Icons.account_balance_wallet_outlined, _cashup);
-    const menu = _Tab('Menu', Icons.restaurant_menu, _menu);
-    const stock = _Tab('Stock', Icons.inventory_2_outlined, _stock);
-    const reports = _Tab('Reports', Icons.bar_chart, _reports);
-    const settings = _Tab('Settings', Icons.settings_outlined, _settings);
+    const order = _Tab('Order', Icons.point_of_sale, _cashier, 'Till');
+    const kitchen = _Tab('Kitchen', Icons.soup_kitchen, _kitchen, 'Till');
+    const dash = _Tab('Dashboard', Icons.dashboard_outlined, _dashboard, 'Money');
+    const staff = _Tab('Staff', Icons.badge_outlined, _staff, 'Admin');
+    const requests = _Tab('Requests', Icons.edit_note, _requests, 'Stock & menu');
+    const orders = _Tab('Orders', Icons.receipt_long, _orders, 'Till');
+    const cashup = _Tab('Cash-up', Icons.account_balance_wallet_outlined, _cashup, 'Money');
+    const menu = _Tab('Menu', Icons.restaurant_menu, _menu, 'Stock & menu');
+    const stock = _Tab('Stock', Icons.inventory_2_outlined, _stock, 'Stock & menu');
+    const reports = _Tab('Reports', Icons.bar_chart, _reports, 'Money');
+    const settings = _Tab('Settings', Icons.settings_outlined, _settings, 'Admin');
     switch (role) {
       case 'cashier':
         return const [order, orders, dash];
@@ -66,7 +69,7 @@ class _ShellState extends State<Shell> {
       case 'supervisor':
         return const [order, kitchen, orders, cashup, dash];
       case 'admin':
-        return const [dash, order, kitchen, orders, cashup, menu, stock, reports, requests, staff, settings];
+        return const [order, orders, kitchen, dash, reports, cashup, stock, menu, requests, staff, settings];
       default:
         return const [dash];
     }
@@ -145,35 +148,7 @@ class _ShellState extends State<Shell> {
       body: Row(
         children: [
           if (showNav && wide)
-            Container(
-              color: Brand.navy,
-              child: LayoutBuilder(
-                builder: (context, box) => SingleChildScrollView(
-                  child: ConstrainedBox(
-                    constraints: BoxConstraints(minHeight: box.maxHeight),
-                    child: IntrinsicHeight(
-                      child: NavigationRail(
-                        backgroundColor: Brand.navy,
-                        indicatorColor: Brand.navyLight,
-                        selectedIndex: _index,
-                        labelType: NavigationRailLabelType.all,
-                        selectedIconTheme: const IconThemeData(color: Brand.gold),
-                        unselectedIconTheme: const IconThemeData(color: Color(0xFFB8C3DE)),
-                        selectedLabelTextStyle: const TextStyle(
-                            color: Brand.gold, fontWeight: FontWeight.w700, fontSize: 12),
-                        unselectedLabelTextStyle:
-                            const TextStyle(color: Color(0xFFB8C3DE), fontSize: 12),
-                        onDestinationSelected: (i) => setState(() => _index = i),
-                        destinations: [
-                          for (final t in tabs)
-                            NavigationRailDestination(icon: Icon(t.icon), label: Text(t.label)),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
+            _SideMenu(tabs: tabs, index: _index, onTap: (i) => setState(() => _index = i)),
           Expanded(child: tabs[_index].build()),
         ],
       ),
@@ -182,7 +157,13 @@ class _ShellState extends State<Shell> {
               backgroundColor: Brand.navy,
               child: SafeArea(
                 child: ListView(children: [
-                  for (var i = 0; i < tabs.length; i++)
+                  for (var i = 0; i < tabs.length; i++) ...[
+                    if (i == 0 || tabs[i].group != tabs[i - 1].group)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 14, 16, 4),
+                        child: Text(tabs[i].group.toUpperCase(),
+                            style: const TextStyle(color: Color(0xFF7F8DB5), fontSize: 11, fontWeight: FontWeight.w800)),
+                      ),
                     ListTile(
                       leading: Icon(tabs[i].icon,
                           color: i == _index ? Brand.gold : const Color(0xFFB8C3DE)),
@@ -196,6 +177,7 @@ class _ShellState extends State<Shell> {
                         Navigator.pop(context);
                       },
                     ),
+                  ],
                 ]),
               ),
             )
@@ -223,5 +205,64 @@ class _ShellState extends State<Shell> {
             )
           : null,
     ));
+  }
+}
+
+/// Side menu for wide screens: icons with labels, grouped under small headings,
+/// scrolls when the window is short.
+class _SideMenu extends StatelessWidget {
+  const _SideMenu({required this.tabs, required this.index, required this.onTap});
+  final List<_Tab> tabs;
+  final int index;
+  final ValueChanged<int> onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    const soft = Color(0xFFB8C3DE);
+    final grouped = tabs.map((t) => t.group).toSet().length > 1;
+    final children = <Widget>[];
+    String? lastGroup;
+    for (var i = 0; i < tabs.length; i++) {
+      final t = tabs[i];
+      if (grouped && t.group != lastGroup) {
+        lastGroup = t.group;
+        children.add(Padding(
+          padding: const EdgeInsets.fromLTRB(6, 14, 6, 4),
+          child: Text(t.group.toUpperCase(),
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Color(0xFF7F8DB5), fontSize: 9.5, fontWeight: FontWeight.w800, letterSpacing: 0.6)),
+        ));
+      }
+      final selected = i == index;
+      children.add(Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        child: Material(
+          color: selected ? Brand.navyLight : Colors.transparent,
+          borderRadius: BorderRadius.circular(12),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(12),
+            onTap: () => onTap(i),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Column(children: [
+                Icon(t.icon, color: selected ? Brand.gold : soft),
+                const SizedBox(height: 3),
+                Text(t.label,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                        color: selected ? Brand.gold : soft,
+                        fontSize: 12,
+                        fontWeight: selected ? FontWeight.w700 : FontWeight.w400)),
+              ]),
+            ),
+          ),
+        ),
+      ));
+    }
+    return Container(
+      width: 92,
+      color: Brand.navy,
+      child: ListView(padding: const EdgeInsets.only(bottom: 12), children: children),
+    );
   }
 }

@@ -1,0 +1,21 @@
+name: Keep database awake
+
+# The free Supabase plan pauses a project after a week without any use.
+# This reads one public setting twice a week so the database stays awake
+# even when the restaurant is closed for a while.
+on:
+  schedule:
+    - cron: "17 6 * * 1,4"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Read company settings
+        run: |
+          code=$(curl -s -o /dev/null -w "%{http_code}" \
+            -H "apikey: sb_publishable_OAld3pVVrbDnWVWMJRXJtg_5y8oAUO6" \
+            "https://kemnuculvkkyfzjnwvrp.supabase.co/rest/v1/company_settings?select=id")
+          echo "Supabase answered $code"
+          test "$code" = "200"

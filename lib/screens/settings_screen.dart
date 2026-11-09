@@ -7,6 +7,7 @@ import '../data/repo.dart';
 import '../data/sync_service.dart';
 import '../theme.dart';
 import '../widgets/brand_mark.dart';
+import 'admin_tools.dart';
 
 /// Admin: company name, details, logo, VAT, receipt footer and payment methods.
 class SettingsScreen extends StatefulWidget {
@@ -27,7 +28,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
     'reg_number',
     'address',
     'receipt_footer',
+    'invoice_prefix',
+    'timezone',
   ];
+  late final TextEditingController _tables;
   late final TextEditingController _vat;
   bool _cash = true;
   bool _card = true;
@@ -43,6 +47,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _c[k] = TextEditingController(text: '${row[k] ?? ''}');
     }
     _vat = TextEditingController(text: '${row['vat_rate'] ?? 15}');
+    _tables = TextEditingController(text: '${row['table_count'] ?? 12}');
+    if (_c['invoice_prefix']!.text.isEmpty) _c['invoice_prefix']!.text = 'INV';
+    if (_c['timezone']!.text.isEmpty) _c['timezone']!.text = 'Africa/Johannesburg';
     _cash = row['accept_cash'] != false;
     _card = row['accept_card_manual'] != false;
   }
@@ -53,6 +60,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       c.dispose();
     }
     _vat.dispose();
+    _tables.dispose();
     super.dispose();
   }
 
@@ -72,15 +80,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _say('Keep at least one payment method switched on.', error: true);
       return;
     }
-    final base = companyRow() ?? {'id': 1};
-    await LocalStore.upsert('company_settings', {
-      ...base,
-      'id': 1,
+    final tables = int.tryParse(_tables.text.trim());
+    if (tables == null || tables < 0 || tables > 200) {
+      _say('Number of tables must be between 0 and 200.', error: true);
+      return;
+    }
+    final fields = {
       for (final k in _textFields) k: _c[k]!.text.trim(),
       'vat_rate': rate,
       'accept_cash': _cash,
       'accept_card_manual': _card,
-    });
+      'table_count': tables,
+    };
+    if (companyRow()?['id'] == 1) {
+      await LocalStore.patch('company_settings', 1, fields);
+    } else {
+      await LocalStore.insert('company_settings', {'id': 1, ...fields});
+    }
     await SyncService.instance.syncNow();
     _say('Saved. The name and logo update on every device within a minute.');
   }
@@ -259,8 +275,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
-              title: const Text('Credit card (manual)'),
-              subtitle: const Text('Cashier records card type, last 4 digits and slip number'),
+              title: const Text('Card'),
+              subtitle: const Text('Taken on the card machine and recorded as a card payment'),
               value: _card,
               onChanged: (v) => setState(() => _card = v),
             ),
@@ -335,6 +351,40 @@ class _SettingsScreenState extends State<SettingsScreen> {
           }
           return Column(children: [details, const SizedBox(height: 16), payments, const SizedBox(height: 16), receipt]);
         }),
+        const SizedBox(height: 16),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Text('Till and invoices', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+              const SizedBox(height: 12),
+              Wrap(spacing: 14, runSpacing: 14, children: [
+                SizedBox(
+                  width: 200,
+                  child: TextField(
+                      controller: _tables,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                          labelText: 'Number of tables', helperText: '0 hides the Tables view', isDense: true)),
+                ),
+                SizedBox(
+                  width: 200,
+                  child: _field('invoice_prefix', 'Invoice number prefix'),
+                ),
+                SizedBox(
+                  width: 260,
+                  child: _field('timezone', 'Time zone (for reports)'),
+                ),
+              ]),
+              const SizedBox(height: 8),
+              const Text(
+                  'Paid orders get a sequential invoice number from the server (for example INV-000123). With a VAT number above, receipts are headed TAX INVOICE.',
+                  style: TextStyle(color: Brand.muted, fontSize: 12)),
+            ]),
+          ),
+        ),
+        const SizedBox(height: 16),
+        const AdminTools(),
       ],
     );
   }

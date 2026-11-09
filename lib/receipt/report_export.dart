@@ -16,6 +16,7 @@ class ReportTable {
 const reportTabNames = [
   'Sales',
   'Products',
+  'Staff',
   'Buying list',
   'Stock usage',
   'Stock value and purchases',
@@ -44,8 +45,18 @@ List<ReportTable> reportTables(int tab, Map<String, dynamic> d, Map<String, dyna
   }
 
   const types = {'eat_in': 'Eat in', 'take_away': 'Take away', 'delivery': 'Delivery'};
-  String method(dynamic x) => x == 'cash' ? 'Cash' : 'Credit card (manual)';
+  String method(dynamic x) => x == 'cash' ? 'Cash' : 'Card';
 
+  // Tab 2 is the staff report; the ones after it keep their old numbers below.
+  if (tab == 2) {
+    return [
+      ReportTable('Sales by staff member', ['Staff member', 'Paid orders', 'Sales', 'Average order', 'Discounts given', 'Orders cancelled'], [
+        for (final r in _l(d, 'by_staff'))
+          ['${r['name']}', q(r['orders']), m(r['total']), m(r['avg']), m(r['discounts']), q(r['cancelled'])]
+      ]),
+    ];
+  }
+  if (tab > 2) tab -= 1;
   switch (tab) {
     case 0:
       final s = Map<String, dynamic>.from((d['summary'] as Map?) ?? const {});
@@ -55,12 +66,15 @@ List<ReportTable> reportTables(int tab, Map<String, dynamic> d, Map<String, dyna
         ReportTable('Summary (paid orders)', ['Measure', 'Value'], [
           ['Sales including VAT', m(s['gross'])],
           ['Sales excluding VAT', m(s['net'])],
+          ['Discounts given', m(s['discounts'])],
+          ['Refunds given', m(s['refunds'])],
+          ['Sales after refunds', m(s['after_refunds'])],
+          ['Tips (not sales)', m(s['tips'])],
           ['VAT collected', m(s['vat'])],
           ['Paid orders', q(s['orders'])],
           ['Average order', m(s['avg_order'])],
           ['Unpaid orders', '${q(u['orders'])} (${m(u['total'])})'],
           ['Cancelled orders', '${q(v['orders'])} (${m(v['total'])})'],
-          if (refunds != null) ['Refunds given', m(refunds['total'])],
         ]),
         ReportTable('Payments received', ['Method', 'Payments', 'Amount'],
             [for (final p in _l(d, 'payments')) [method(p['method']), q(p['count']), m(p['amount'])]]),

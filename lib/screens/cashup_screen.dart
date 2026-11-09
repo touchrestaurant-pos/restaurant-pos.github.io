@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../data/local_store.dart';
 import '../data/repo.dart';
 import '../theme.dart';
 
@@ -17,6 +18,7 @@ class CashUpScreen extends StatefulWidget {
 
 class _CashUpScreenState extends State<CashUpScreen> {
   DateTime _day = DateTime.now();
+  String? _staff; // null = the whole day, every till
   Map<String, dynamic>? _sum;
   List<Map<String, dynamic>> _history = [];
   String? _error;
@@ -51,7 +53,7 @@ class _CashUpScreenState extends State<CashUpScreen> {
       _error = null;
     });
     try {
-      final res = await _db.rpc('cash_up_summary', params: {'p_date': _d(_day)});
+      final res = await _db.rpc('cash_up_summary', params: {'p_date': _d(_day), 'p_staff': _staff});
       _sum = Map<String, dynamic>.from(res as Map);
       final hist = await _db
           .from('cash_ups')
@@ -89,6 +91,7 @@ class _CashUpScreenState extends State<CashUpScreen> {
         'p_float': _num(_float),
         'p_counted': _num(_counted),
         'p_notes': _notes.text.trim(),
+        'p_staff': _staff,
       });
       _counted.clear();
       _notes.clear();
@@ -120,7 +123,12 @@ class _CashUpScreenState extends State<CashUpScreen> {
     final s = _sum;
     final cashSales = n(s?['cash_sales']).toDouble();
     final cashRefunds = n(s?['cash_refunds']).toDouble();
-    final expected = _num(_float) + cashSales - cashRefunds;
+    final cashTips = n(s?['cash_tips']).toDouble();
+    final expected = _num(_float) + cashSales + cashTips - cashRefunds;
+    final staffList = LocalStore.rows('staff_profiles')
+        .where((p) => p['active'] != false && const ['cashier', 'supervisor', 'admin'].contains(p['role']))
+        .toList()
+      ..sort((a, b) => '${a['full_name']}'.compareTo('${b['full_name']}'));
     final counted = _counted.text.trim().isEmpty ? null : _num(_counted);
     final variance = counted == null ? 0.0 : round2(counted - expected);
     final done = s?['done'] as Map?;
@@ -150,7 +158,20 @@ class _CashUpScreenState extends State<CashUpScreen> {
             }
           },
         ),
-        const Text('Counts every payment and refund taken on this day.', style: TextStyle(color: Brand.muted)),
+        DropdownButton<String?>(
+          value: _staff,
+          items: [
+            const DropdownMenuItem<String?>(value: null, child: Text('Whole day (all tills)')),
+            for (final p in staffList)
+              DropdownMenuItem<String?>(value: p['id'] as String, child: Text('${p['full_name']}')),
+          ],
+          onChanged: (v) {
+            setState(() => _staff = v);
+            _load();
+          },
+        ),
+        Text(_staff == null ? 'Counts every payment and refund on this day.' : 'Only what this person took, for a drawer of their own.',
+            style: const TextStyle(color: Brand.muted)),
       ]),
       const SizedBox(height: 16),
       if (_loading && s == null) const Center(child: CircularProgressIndicator()),
@@ -181,6 +202,7 @@ class _CashUpScreenState extends State<CashUpScreen> {
                     decoration: const InputDecoration(labelText: 'Opening float', prefixText: 'R')),
                 const SizedBox(height: 10),
                 _row('Cash sales (${s['cash_count']} payments)', money(cashSales)),
+                _row('Cash tips (pay out to staff)', money(cashTips)),
                 _row('Cash refunds', '-${money(cashRefunds)}'),
                 const Divider(),
                 _row('Expected in drawer', money(expected), bold: true),
@@ -218,9 +240,10 @@ class _CashUpScreenState extends State<CashUpScreen> {
                 _row('Card sales', money(n(s['card_sales']))),
                 _row('Card slips to match', '${s['card_slips']}'),
                 _row('Card refunds', '-${money(n(s['card_refunds']))}'),
+                _row('Card tips (pay out to staff)', money(n(s['card_tips']))),
                 const Divider(),
                 _row('Card total to match against the machine',
-                    money(n(s['card_sales']) - n(s['card_refunds'])), bold: true),
+                    money(n(s['card_sales']) + n(s['card_tips']) - n(s['card_refunds'])), bold: true),
                 const SizedBox(height: 8),
                 const Text('Compare this with the card machine settlement report for the day.',
                     style: TextStyle(color: Brand.muted, fontSize: 12)),
@@ -237,6 +260,35 @@ class _CashUpScreenState extends State<CashUpScreen> {
           return Column(children: [cash, card]);
         }),
       ],
+      if (s != null && _staff == null && ((s['by_staff'] as List?) ?? const []).isNotEmpty)
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Text('Taken by each staff member', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+              const SizedBox(height: 8),
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: DataTable(columns: const [
+                  DataColumn(label: Text('Staff member')),
+                  DataColumn(label: Text('Cash'), numeric: true),
+                  DataColumn(label: Text('Card'), numeric: true),
+                  DataColumn(label: Text('Tips'), numeric: true),
+                  DataColumn(label: Text('Payments'), numeric: true),
+                ], rows: [
+                  for (final b in (s['by_staff'] as List).map((e) => Map<String, dynamic>.from(e as Map)))
+                    DataRow(cells: [
+                      DataCell(Text('${b['name']}')),
+                      DataCell(Text(money(n(b['cash'])))),
+                      DataCell(Text(money(n(b['card'])))),
+                      DataCell(Text(money(n(b['tips'])))),
+                      DataCell(Text('${b['payments']}')),
+                    ]),
+                ]),
+              ),
+            ]),
+          ),
+        ),
       if (_history.isNotEmpty)
         Card(
           child: Padding(
@@ -248,6 +300,7 @@ class _CashUpScreenState extends State<CashUpScreen> {
                 scrollDirection: Axis.horizontal,
                 child: DataTable(columns: const [
                   DataColumn(label: Text('Date')),
+                  DataColumn(label: Text('Drawer')),
                   DataColumn(label: Text('Expected'), numeric: true),
                   DataColumn(label: Text('Counted'), numeric: true),
                   DataColumn(label: Text('Variance'), numeric: true),
@@ -257,6 +310,9 @@ class _CashUpScreenState extends State<CashUpScreen> {
                   for (final h in _history)
                     DataRow(cells: [
                       DataCell(Text('${h['business_date']}')),
+                      DataCell(Text(h['staff_id'] == null
+                          ? 'Whole day'
+                          : '${LocalStore.row('staff_profiles', h['staff_id'])?['full_name'] ?? 'Staff'}')),
                       DataCell(Text(money(n(h['expected_cash'])))),
                       DataCell(Text(money(n(h['counted_cash'])))),
                       DataCell(Text(money(n(h['variance'])),

@@ -1,7 +1,6 @@
 import 'dart:math';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../data/repo.dart';
 import '../theme.dart';
@@ -70,9 +69,6 @@ class _PaymentDialogState extends State<_PaymentDialog> {
   late final TextEditingController _amount;
   late final TextEditingController _tendered;
   final _tip = TextEditingController();
-  final _last4 = TextEditingController();
-  final _slip = TextEditingController();
-  String _brand = 'Visa';
 
   @override
   void initState() {
@@ -91,8 +87,6 @@ class _PaymentDialogState extends State<_PaymentDialog> {
     _amount.dispose();
     _tendered.dispose();
     _tip.dispose();
-    _last4.dispose();
-    _slip.dispose();
     super.dispose();
   }
 
@@ -104,7 +98,7 @@ class _PaymentDialogState extends State<_PaymentDialog> {
   bool get _valid {
     if (_payAmount <= 0) return false;
     if (_method == 'cash') return _num(_tendered) + 0.001 >= _payAmount + _tipValue;
-    return _last4.text.length == 4 && _slip.text.trim().isNotEmpty;
+    return true;
   }
 
   void _confirm() {
@@ -116,12 +110,7 @@ class _PaymentDialogState extends State<_PaymentDialog> {
         'change_given': _change,
       });
     } else {
-      Navigator.pop(context, {
-        ...base,
-        'card_brand': _brand,
-        'card_last4': _last4.text,
-        'slip_no': _slip.text.trim(),
-      });
+      Navigator.pop(context, base);
     }
   }
 
@@ -173,7 +162,7 @@ class _PaymentDialogState extends State<_PaymentDialog> {
               SegmentedButton<String>(
                 segments: [
                   if (_cashOk) const ButtonSegment(value: 'cash', label: Text('Cash')),
-                  if (_cardOk) const ButtonSegment(value: 'card_manual', label: Text('Credit card (manual)')),
+                  if (_cardOk) const ButtonSegment(value: 'card_manual', label: Text('Card')),
                 ],
                 selected: {_method},
                 onSelectionChanged: (s) => setState(() => _method = s.first),
@@ -259,30 +248,11 @@ class _PaymentDialogState extends State<_PaymentDialog> {
                   ),
                 ),
               ] else ...[
-                const Text('Take the payment on your card machine first, then record it here.',
-                    style: TextStyle(color: Brand.muted)),
-                const SizedBox(height: 12),
-                Wrap(
-                  spacing: 8,
-                  children: [
-                    for (final b in ['Visa', 'Mastercard', 'Other'])
-                      ChoiceChip(label: Text(b), selected: _brand == b, onSelected: (_) => setState(() => _brand = b)),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: _last4,
-                  keyboardType: TextInputType.number,
-                  maxLength: 4,
-                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                  onChanged: (_) => setState(() {}),
-                  decoration: const InputDecoration(labelText: 'Last 4 digits of the card', counterText: ''),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: _slip,
-                  onChanged: (_) => setState(() {}),
-                  decoration: const InputDecoration(labelText: 'Slip / approval number'),
+                Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(color: const Color(0xFFE8EEFB), borderRadius: BorderRadius.circular(12)),
+                  child: Text('Take ${money(showDue)} on the card machine, then press Record card payment.',
+                      style: const TextStyle(fontWeight: FontWeight.w700, color: Brand.navy)),
                 ),
               ],
             ],

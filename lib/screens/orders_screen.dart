@@ -74,7 +74,9 @@ class _OrdersScreenState extends State<OrdersScreen> {
                       ListTile(
                         onTap: () => showReceiptDialog(context, o['id'] as String),
                         leading: const Icon(Icons.receipt_long, color: Brand.navy),
-                        title: Text('#${o['order_ref']} · ${money(n(o['total']))}',
+                        title: Text(
+                            '#${o['order_ref']} · ${money(n(o['total']))}'
+                            '${o['invoice_no'] != null ? ' · INV-${'${o['invoice_no']}'.padLeft(6, '0')}' : ''}',
                             style: const TextStyle(fontWeight: FontWeight.w700)),
                         subtitle: Text(_subtitle(o)),
                         trailing: _badge(o),
@@ -93,7 +95,7 @@ class _OrdersScreenState extends State<OrdersScreen> {
         : '${t.year}-${t.month.toString().padLeft(2, '0')}-${t.day.toString().padLeft(2, '0')} '
             '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
     const types = {'eat_in': 'Eat in', 'take_away': 'Take away', 'delivery': 'Delivery'};
-    final items = OrderRepo.itemsFor(o['id'] as String).map((e) => '${e['qty']}x ${e['name']}').join(', ');
+    final items = OrderRepo.liveItemsFor(o['id'] as String).map((e) => '${e['qty']}x ${e['name']}').join(', ');
     return '$when · ${types[o['order_type']] ?? ''}${o['table_no'] != null ? ' ${o['table_no']}' : ''}\n$items';
   }
 
@@ -104,7 +106,7 @@ class _OrdersScreenState extends State<OrdersScreen> {
       text = 'Cancelled';
       bg = const Color(0xFFF8D7DB);
     } else if (o['paid'] != true) {
-      text = 'Unpaid';
+      text = OrderRepo.paidAmount(o['id'] as String) > 0 ? 'Part paid' : 'Unpaid';
       bg = const Color(0xFFFFF1CC);
     } else {
       text = 'Paid';

@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../data/local_store.dart';
 import '../data/repo.dart';
+import 'purchase_orders.dart';
 import '../receipt/download_file.dart';
 import '../receipt/report_export.dart';
 import '../theme.dart';
@@ -99,6 +101,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
       });
       _data = Map<String, dynamic>.from(res as Map);
       _loaded = range;
+      _cachedAt = null;
       try {
         final rf = await Supabase.instance.client.rpc('admin_refunds', params: {
           'p_from': range.start.toUtc().toIso8601String(),
@@ -118,12 +121,38 @@ class _ReportsScreenState extends State<ReportsScreen> {
       } catch (_) {
         _prev = null;
       }
+      try {
+        await LocalStore.setMeta('last_report', {
+          'data': _data,
+          'refunds': _refunds,
+          'from': range.start.toIso8601String(),
+          'to': range.end.toIso8601String(),
+          'at': DateTime.now().toIso8601String(),
+        });
+      } catch (_) {}
     } on PostgrestException catch (e) {
       _error = e.message;
     } catch (_) {
       _error = 'Reports need an internet connection. Connect and press Refresh.';
+      // Show the last report that was downloaded, clearly marked.
+      final saved = LocalStore.getMeta('last_report');
+      if (saved is Map && _data == null) {
+        _data = Map<String, dynamic>.from(_deep(saved['data']) as Map);
+        _refunds = saved['refunds'] == null ? null : Map<String, dynamic>.from(_deep(saved['refunds']) as Map);
+        _loaded = DateTimeRange(start: DateTime.parse('${saved['from']}'), end: DateTime.parse('${saved['to']}'));
+        _cachedAt = DateTime.tryParse('${saved['at']}');
+      }
     }
     if (mounted) setState(() => _loading = false);
+  }
+
+  DateTime? _cachedAt;
+
+  /// Hive gives back plain maps and lists; make them string-keyed again.
+  static dynamic _deep(dynamic v) {
+    if (v is Map) return {for (final e in v.entries) '${e.key}': _deep(e.value)};
+    if (v is List) return v.map(_deep).toList();
+    return v;
   }
 
   String get _periodText {
@@ -170,7 +199,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
   Widget build(BuildContext context) {
     final range = _loaded;
     return DefaultTabController(
-      length: 6,
+      length: 7,
       child: Column(
         children: [
           Padding(
@@ -254,6 +283,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
             tabs: [
               Tab(text: 'Sales'),
               Tab(text: 'Products'),
+              Tab(text: 'Staff'),
               Tab(text: 'Buying list'),
               Tab(text: 'Stock usage'),
               Tab(text: 'Stock value & purchases'),
@@ -274,12 +304,22 @@ class _ReportsScreenState extends State<ReportsScreen> {
                           TabBarView(children: [
                             _sales(),
                             _products(),
+                            _staff(),
                             _buying(),
                             _usage(),
                             _valuation(),
                             _voids(),
                           ]),
                           if (_loading) const LinearProgressIndicator(),
+                          if (_cachedAt != null)
+                            Container(
+                              width: double.infinity,
+                              color: const Color(0xFFFFF4D6),
+                              padding: const EdgeInsets.all(8),
+                              child: Text(
+                                  'Offline: showing the report saved at ${_cachedAt!.hour.toString().padLeft(2, '0')}:${_cachedAt!.minute.toString().padLeft(2, '0')} on ${_dateText(_cachedAt!)}.',
+                                  style: const TextStyle(fontWeight: FontWeight.w700, color: Color(0xFF7A4B00))),
+                            ),
                         ],
                       ),
           ),
@@ -392,8 +432,13 @@ class _ReportsScreenState extends State<ReportsScreen> {
     return ListView(padding: const EdgeInsets.all(20), children: [
       Wrap(spacing: 12, runSpacing: 12, children: [
         _tile('Sales (incl. VAT)', money(n(s['gross'])), sub: _vs('summary', 'gross')),
+        _tile('After refunds', money(n(s['after_refunds'])),
+            sub: n(s['refunds']) > 0 ? 'Refunds ${money(n(s['refunds']))}' : 'No refunds'),
         _tile('Sales (excl. VAT)', money(n(s['net'])), sub: _vs('summary', 'net')),
         _tile('VAT collected', money(n(s['vat']))),
+        _tile('Discounts given', money(n(s['discounts'])),
+            sub: '${_list('discount_list').length} orders', color: n(s['discounts']) > 0 ? Brand.amber : null),
+        _tile('Tips', money(n(s['tips'])), sub: 'Not part of sales'),
         _tile('Paid orders', '${s['orders'] ?? 0}',
             sub: 'Average ${money(n(s['avg_order']))}\n${_vs('summary', 'orders') ?? ''}'),
         _tile('Unpaid orders', '${unpaid['orders'] ?? 0}',
@@ -432,7 +477,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
           title: 'Payment methods',
           slices: [
             for (final p in _list('payments'))
-              ChartPoint(p['method'] == 'cash' ? 'Cash' : 'Credit card', n(p['amount']).toDouble())
+              ChartPoint(p['method'] == 'cash' ? 'Cash' : 'Card', n(p['amount']).toDouble())
           ],
           format: (v) => money(v),
         );
@@ -453,11 +498,19 @@ class _ReportsScreenState extends State<ReportsScreen> {
         }
         return Column(children: [pay, type]);
       }),
+      if (_list('discount_list').isNotEmpty)
+        _section(
+            'Discounts',
+            _table(['Order', 'Invoice', 'Discount', 'Reason', 'By'], [
+              for (final d in _list('discount_list'))
+                ['#${d['ref']}', d['invoice'] == null ? '' : '${d['invoice']}', money(n(d['discount'])), '${d['reason'] ?? ''}', '${d['by']}']
+            ], right: {2}),
+            note: 'Every discount and who gave it.'),
       _section(
           'Payments received',
           _table(['Method', 'Payments', 'Amount'], [
             for (final p in _list('payments'))
-              [p['method'] == 'cash' ? 'Cash' : 'Credit card (manual)', '${p['count']}', money(n(p['amount']))]
+              [p['method'] == 'cash' ? 'Cash' : 'Card', '${p['count']}', money(n(p['amount']))]
           ], right: {1, 2})),
       _section(
           'Sales by day',
@@ -604,6 +657,29 @@ class _ReportsScreenState extends State<ReportsScreen> {
 
   // ---- Buying list ---------------------------------------------------------
 
+  Widget _staff() {
+    final rows = _list('by_staff');
+    return ListView(padding: const EdgeInsets.all(20), children: [
+      RankedBars(
+        title: 'Sales by staff member',
+        points: [
+          for (final r in rows)
+            ChartPoint('${r['name']}', n(r['total']).toDouble(),
+                detail: '${r['orders']} orders · average ${money(n(r['avg']))} · discounts ${money(n(r['discounts']))} · cancelled ${r['cancelled']}')
+        ],
+        format: (v) => money(v),
+        note: 'Who took the paid orders in this period. Tap a name for details.',
+      ),
+      _section(
+          'Staff summary',
+          _table(['Staff member', 'Paid orders', 'Sales', 'Average order', 'Discounts given', 'Orders cancelled'], [
+            for (final r in rows)
+              ['${r['name']}', '${r['orders']}', money(n(r['total'])), money(n(r['avg'])), money(n(r['discounts'])), '${r['cancelled']}']
+          ], right: {1, 2, 3, 4, 5}),
+          note: 'A high number of discounts or cancellations for one person is worth a closer look.'),
+    ]);
+  }
+
   Widget _buying() {
     final rows = _list('reorder');
     final bySupplier = <String, List<Map<String, dynamic>>>{};
@@ -620,6 +696,45 @@ class _ReportsScreenState extends State<ReportsScreen> {
         _tile('Out of stock', '${rows.where((r) => n(r['on_hand']) <= 0).length}',
             color: Brand.red),
       ]),
+      const SizedBox(height: 12),
+      Wrap(spacing: 10, children: [
+        FilledButton.icon(
+          onPressed: rows.isEmpty || _cachedAt != null
+              ? null
+              : () async {
+                  try {
+                    final made = await createPurchaseOrdersFromReorder(rows);
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                          content: Text(made == 0
+                              ? 'No items with a supplier to order.'
+                              : '$made draft purchase order${made == 1 ? '' : 's'} made. Open Stock, Purchase orders to check and send them.')));
+                    }
+                  } catch (e) {
+                    if (mounted) {
+                      ScaffoldMessenger.of(context)
+                          .showSnackBar(SnackBar(content: Text('Could not make purchase orders: $e')));
+                    }
+                  }
+                },
+          icon: const Icon(Icons.playlist_add),
+          label: const Text('Make purchase orders'),
+        ),
+      ]),
+      if (_list('negative').isNotEmpty)
+        Padding(
+          padding: const EdgeInsets.only(top: 12),
+          child: Text(
+              'Below zero (count these): ${_list('negative').map((r) => '${r['item']} ${_q(r['on_hand'])} ${r['unit']}').join(', ')}',
+              style: const TextStyle(color: Brand.red, fontWeight: FontWeight.w600)),
+        ),
+      if (_list('expiring').isNotEmpty)
+        Padding(
+          padding: const EdgeInsets.only(top: 8),
+          child: Text(
+              'Use first, expiring soon: ${_list('expiring').map((r) => '${r['item']} (${r['expiry']})').join(', ')}',
+              style: const TextStyle(color: Color(0xFF7A4B00), fontWeight: FontWeight.w600)),
+        ),
       const SizedBox(height: 16),
       RankedBars(
         title: 'How long stock will last',

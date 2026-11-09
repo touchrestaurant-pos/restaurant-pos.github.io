@@ -107,7 +107,7 @@ class RLine {
   final bool bold;
 }
 
-String _method(dynamic m) => m == 'cash' ? 'Cash' : 'Credit card';
+String _method(dynamic m) => m == 'cash' ? 'Cash' : 'Card';
 String _lineTotal(Map<String, dynamic> i) => money(n(i['qty']) * n(i['unit_price']));
 final _when = DateFormat('yyyy-MM-dd HH:mm');
 String _rate() => vatRate().toStringAsFixed(vatRate() == vatRate().roundToDouble() ? 0 : 1);
