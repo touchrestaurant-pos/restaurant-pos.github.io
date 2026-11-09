@@ -8,6 +8,8 @@ import '../widgets/sync_chip.dart';
 import 'cashier_screen.dart';
 import 'dashboard_screen.dart';
 import 'kitchen_screen.dart';
+import '../data/sync_service.dart';
+import 'settings_screen.dart';
 import 'special_requests_screen.dart';
 import 'staff_screen.dart';
 
@@ -43,6 +45,7 @@ class _ShellState extends State<Shell> {
     const dash = _Tab('Dashboard', Icons.dashboard_outlined, _dashboard);
     const staff = _Tab('Staff', Icons.badge_outlined, _staff);
     const requests = _Tab('Requests', Icons.edit_note, _requests);
+    const settings = _Tab('Settings', Icons.settings_outlined, _settings);
     switch (role) {
       case 'cashier':
         return const [order, dash];
@@ -53,7 +56,7 @@ class _ShellState extends State<Shell> {
       case 'supervisor':
         return const [order, kitchen, dash];
       case 'admin':
-        return const [dash, order, kitchen, requests, staff];
+        return const [dash, order, kitchen, requests, staff, settings];
       default:
         return const [dash];
     }
@@ -64,6 +67,7 @@ class _ShellState extends State<Shell> {
   static Widget _dashboard() => const DashboardScreen();
   static Widget _staff() => const StaffScreen();
   static Widget _requests() => const SpecialRequestsScreen();
+  static Widget _settings() => const SettingsScreen();
 
   @override
   Widget build(BuildContext context) {
@@ -73,7 +77,10 @@ class _ShellState extends State<Shell> {
     final wide = MediaQuery.of(context).size.width >= 760;
     final showNav = tabs.length > 1;
 
-    return Scaffold(
+    // Rebuild when synced data changes, so a new company name or logo shows at once.
+    return ListenableBuilder(
+      listenable: SyncService.instance,
+      builder: (context, _) => Scaffold(
       appBar: AppBar(
         titleSpacing: 16,
         title: Row(
@@ -165,6 +172,6 @@ class _ShellState extends State<Shell> {
               ),
             )
           : null,
-    );
+    ));
   }
 }
