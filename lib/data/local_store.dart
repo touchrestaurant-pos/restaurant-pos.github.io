@@ -41,13 +41,18 @@ class LocalStore {
   static Future<void> upsert(String table, Map<String, dynamic> row) async {
     final list = rows(table);
     final i = list.indexWhere((r) => r['id'] == row['id']);
+    Map<String, dynamic> full;
     if (i >= 0) {
-      list[i] = {...list[i], ...row};
+      full = {...list[i], ...row};
+      list[i] = full;
     } else {
+      full = row;
       list.add(row);
     }
     await _cache.put(table, list);
-    await _queue(table, 'upsert', row);
+    // Queue the complete row: the server needs every required column even when
+    // only one field (like the status) changed.
+    await _queue(table, 'upsert', full);
   }
 
   static Future<void> delete(String table, String id) async {

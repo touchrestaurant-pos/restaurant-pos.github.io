@@ -1,16 +1,7 @@
 import 'package:flutter/material.dart';
 
-import '../data/local_store.dart';
+import '../data/repo.dart';
 import '../theme.dart';
-
-/// The company row (name, logo, details) set by the admin in Company settings.
-/// Falls back to a copy saved before sign-in so the login screen can show it.
-Map<String, dynamic>? companyRow() {
-  final rows = LocalStore.rows('company_settings');
-  if (rows.isNotEmpty) return rows.first;
-  final saved = LocalStore.getMeta('brand');
-  return saved is Map ? Map<String, dynamic>.from(saved) : null;
-}
 
 String companyDisplayName() {
   final c = companyRow();

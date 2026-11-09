@@ -6,7 +6,7 @@ import 'config.dart';
 import 'data/local_store.dart';
 import 'data/sync_service.dart';
 import 'screens/login_screen.dart';
-import 'screens/role_home.dart';
+import 'screens/shell.dart';
 import 'theme.dart';
 
 Future<void> main() async {
@@ -38,7 +38,7 @@ class PosApp extends StatelessWidget {
       home: ListenableBuilder(
         listenable: AuthService.instance,
         builder: (context, _) =>
-            AuthService.instance.signedIn ? const RoleHome() : const LoginScreen(),
+            AuthService.instance.signedIn ? const Shell() : const LoginScreen(),
       ),
     );
   }
