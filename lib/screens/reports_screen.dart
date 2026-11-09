@@ -4,6 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../data/repo.dart';
 import '../theme.dart';
+import 'report_charts.dart';
 
 /// Admin reports. All figures are calculated on the server for the chosen dates,
 /// so they are exact and do not depend on what is stored on this device.
@@ -18,6 +19,10 @@ class _ReportsScreenState extends State<ReportsScreen> {
   String _period = 'today';
   DateTimeRange? _custom;
   Map<String, dynamic>? _data;
+  Map<String, dynamic>? _prev;
+  String _metric = 'revenue';
+  int _topN = 10;
+  String _category = 'All';
   bool _loading = false;
   String? _error;
   DateTimeRange? _loaded;
@@ -90,6 +95,16 @@ class _ReportsScreenState extends State<ReportsScreen> {
       });
       _data = Map<String, dynamic>.from(res as Map);
       _loaded = range;
+      try {
+        final len = range.end.difference(range.start);
+        final prev = await Supabase.instance.client.rpc('admin_report', params: {
+          'p_from': range.start.subtract(len).toUtc().toIso8601String(),
+          'p_to': range.start.toUtc().toIso8601String(),
+        });
+        _prev = Map<String, dynamic>.from(prev as Map);
+      } catch (_) {
+        _prev = null;
+      }
     } on PostgrestException catch (e) {
       _error = e.message;
     } catch (_) {
@@ -292,6 +307,16 @@ class _ReportsScreenState extends State<ReportsScreen> {
     return x == x.roundToDouble() ? x.toInt().toString() : x.toStringAsFixed(2);
   }
 
+  /// "Up 12.3% on the previous period" under a tile.
+  String? _vs(String section, String field) {
+    if (_prev == null) return null;
+    final cur = n((_data?[section] as Map?)?[field]).toDouble();
+    final old = n((_prev?[section] as Map?)?[field]).toDouble();
+    if (old == 0) return cur == 0 ? null : 'New, none in previous period';
+    final d = (cur - old) / old * 100;
+    return '${d >= 0 ? 'Up' : 'Down'} ${d.abs().toStringAsFixed(1)}% on previous period';
+  }
+
   String _pct(num part, num whole) =>
       whole == 0 ? '-' : '${(part / whole * 100).toStringAsFixed(1)}%';
 
@@ -304,16 +329,64 @@ class _ReportsScreenState extends State<ReportsScreen> {
     const typeNames = {'eat_in': 'Eat in', 'take_away': 'Take away', 'delivery': 'Delivery'};
     return ListView(padding: const EdgeInsets.all(20), children: [
       Wrap(spacing: 12, runSpacing: 12, children: [
-        _tile('Sales (incl. VAT)', money(n(s['gross']))),
-        _tile('Sales (excl. VAT)', money(n(s['net']))),
+        _tile('Sales (incl. VAT)', money(n(s['gross'])), sub: _vs('summary', 'gross')),
+        _tile('Sales (excl. VAT)', money(n(s['net'])), sub: _vs('summary', 'net')),
         _tile('VAT collected', money(n(s['vat']))),
-        _tile('Paid orders', '${s['orders'] ?? 0}', sub: 'Average ${money(n(s['avg_order']))}'),
+        _tile('Paid orders', '${s['orders'] ?? 0}',
+            sub: 'Average ${money(n(s['avg_order']))}\n${_vs('summary', 'orders') ?? ''}'),
         _tile('Unpaid orders', '${unpaid['orders'] ?? 0}',
             sub: money(n(unpaid['total'])), color: n(unpaid['orders']) > 0 ? Brand.amber : null),
         _tile('Cancelled orders', '${voided['orders'] ?? 0}',
             sub: money(n(voided['total'])), color: n(voided['orders']) > 0 ? Brand.red : null),
       ]),
       const SizedBox(height: 16),
+      LineCard(
+        title: 'Sales trend',
+        points: [
+          for (final d in _list('by_day'))
+            ChartPoint('${d['day']}'.substring(5), n(d['total']).toDouble(),
+                detail: '${d['orders']} orders')
+        ],
+        format: (v) => money(v),
+        note: 'Tap a point to pin its figures.',
+      ),
+      BarCard(
+        title: 'Busiest hours',
+        points: [
+          for (final h in _list('by_hour'))
+            ChartPoint('${n(h['hour']).toInt()}h', n(h['total']).toDouble(),
+                detail: '${h['orders']} orders')
+        ],
+        format: (v) => money(v),
+        color: const Color(0xFF2C7BE5),
+        note: 'Use this to plan staffing and prep.',
+      ),
+      LayoutBuilder(builder: (context, box) {
+        final pay = PieCard(
+          title: 'Payment methods',
+          slices: [
+            for (final p in _list('payments'))
+              ChartPoint(p['method'] == 'cash' ? 'Cash' : 'Credit card', n(p['amount']).toDouble())
+          ],
+          format: (v) => money(v),
+        );
+        final type = PieCard(
+          title: 'Order types',
+          slices: [
+            for (final t in _list('by_type'))
+              ChartPoint(typeNames[t['type']] ?? '${t['type']}', n(t['total']).toDouble())
+          ],
+          format: (v) => money(v),
+        );
+        if (box.maxWidth > 1000) {
+          return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Expanded(child: pay),
+            const SizedBox(width: 16),
+            Expanded(child: type),
+          ]);
+        }
+        return Column(children: [pay, type]);
+      }),
       _section(
           'Payments received',
           _table(['Method', 'Payments', 'Amount'], [
@@ -331,16 +404,6 @@ class _ReportsScreenState extends State<ReportsScreen> {
             for (final t in _list('by_type'))
               [typeNames[t['type']] ?? '${t['type']}', '${t['orders']}', money(n(t['total']))]
           ], right: {1, 2})),
-      _section(
-          'Busiest hours',
-          _table(['Hour', 'Orders', 'Sales'], [
-            for (final h in _list('by_hour'))
-              [
-                '${n(h['hour']).toInt().toString().padLeft(2, '0')}:00',
-                '${h['orders']}',
-                money(n(h['total']))
-              ]
-          ], right: {1, 2})),
     ]);
   }
 
@@ -356,7 +419,85 @@ class _ReportsScreenState extends State<ReportsScreen> {
       net += n(p['net']);
       cost += n(p['cost']);
     }
+    final cats2 = ['All', ...{for (final p in rows) '${p['category']}'}];
+    if (!cats2.contains(_category)) _category = 'All';
+    final filtered = rows.where((p) => _category == 'All' || p['category'] == _category).toList();
+    double metricOf(Map<String, dynamic> p) {
+      switch (_metric) {
+        case 'qty':
+          return n(p['qty']).toDouble();
+        case 'profit':
+          return n(p['net']).toDouble() - n(p['cost']).toDouble();
+        default:
+          return n(p['revenue']).toDouble();
+      }
+    }
+
+    filtered.sort((a, b) => metricOf(b).compareTo(metricOf(a)));
+    final shown = filtered.take(_topN).toList();
+    String fmtMetric(double v) => _metric == 'qty' ? '${v.toStringAsFixed(0)} sold' : money(v);
+
     return ListView(padding: const EdgeInsets.all(20), children: [
+      RankedBars(
+        title: 'Top products',
+        points: [
+          for (final p in shown)
+            ChartPoint('${p['name']}', metricOf(p),
+                detail:
+                    '${_q(p['qty'])} sold · sales ${money(n(p['revenue']))} · profit ${money(n(p['net']) - n(p['cost']))} · margin ${_pct(n(p['net']) - n(p['cost']), n(p['net']))}')
+        ],
+        format: fmtMetric,
+        note: 'Tap a product for its figures. Change what is measured, the category or how many to show.',
+        action: Wrap(spacing: 8, children: [
+          SegmentedButton<String>(
+            showSelectedIcon: false,
+            style: const ButtonStyle(visualDensity: VisualDensity.compact),
+            segments: const [
+              ButtonSegment(value: 'revenue', label: Text('Sales')),
+              ButtonSegment(value: 'profit', label: Text('Profit')),
+              ButtonSegment(value: 'qty', label: Text('Qty')),
+            ],
+            selected: {_metric},
+            onSelectionChanged: (v) => setState(() => _metric = v.first),
+          ),
+          DropdownButton<String>(
+            value: _category,
+            underline: const SizedBox(),
+            items: [for (final c in cats2) DropdownMenuItem(value: c, child: Text(c))],
+            onChanged: (v) => setState(() => _category = v ?? 'All'),
+          ),
+          DropdownButton<int>(
+            value: _topN,
+            underline: const SizedBox(),
+            items: const [
+              DropdownMenuItem(value: 5, child: Text('Top 5')),
+              DropdownMenuItem(value: 10, child: Text('Top 10')),
+              DropdownMenuItem(value: 20, child: Text('Top 20')),
+              DropdownMenuItem(value: 100, child: Text('All')),
+            ],
+            onChanged: (v) => setState(() => _topN = v ?? 10),
+          ),
+        ]),
+      ),
+      PieCard(
+        title: 'Sales share by category',
+        slices: [for (final c in cats) ChartPoint('${c['category']}', n(c['revenue']).toDouble())],
+        format: (v) => money(v),
+      ),
+      RankedBars(
+        title: 'Lowest margin products',
+        points: [
+          for (final p in ([...rows.where((p) => n(p['net']) > 0)]
+                ..sort((a, b) => ((n(a['net']) - n(a['cost'])) / n(a['net']))
+                    .compareTo((n(b['net']) - n(b['cost'])) / n(b['net']))))
+              .take(8))
+            ChartPoint('${p['name']}', (n(p['net']) - n(p['cost'])) / n(p['net']) * 100,
+                detail: 'Sales excl. VAT ${money(n(p['net']))}, ingredient cost ${money(n(p['cost']))}')
+        ],
+        format: (v) => '${v.toStringAsFixed(1)}%',
+        colorFor: (p) => p.value < 55 ? Brand.red : (p.value < 65 ? Brand.amber : Brand.green),
+        note: 'Red is under 55% margin, amber under 65%. Consider repricing these or checking portion sizes.',
+      ),
       _section(
           'Product sales and profit',
           _table(
@@ -413,6 +554,21 @@ class _ReportsScreenState extends State<ReportsScreen> {
         _tile('Out of stock', '${rows.where((r) => n(r['on_hand']) <= 0).length}',
             color: Brand.red),
       ]),
+      const SizedBox(height: 16),
+      RankedBars(
+        title: 'How long stock will last',
+        points: [
+          for (final r in ([...rows.where((r) => r['days_left'] != null)]
+                ..sort((a, b) => n(a['days_left']).compareTo(n(b['days_left']))))
+              .take(12))
+            ChartPoint('${r['item']}', n(r['days_left']).toDouble(),
+                detail:
+                    '${_q(r['on_hand'])} ${r['unit']} on hand, using about ${_q(r['daily_use'])} ${r['unit']} a day, order ${_q(r['suggested'])} ${r['unit']} from ${r['supplier']}')
+        ],
+        format: (v) => '${v.toStringAsFixed(1)} days',
+        colorFor: (p) => p.value < 2 ? Brand.red : (p.value < 5 ? Brand.amber : Brand.green),
+        note: 'Based on the last 14 days of use. Red is under 2 days left.',
+      ),
       const SizedBox(height: 8),
       const Padding(
         padding: EdgeInsets.symmetric(vertical: 8),
@@ -480,6 +636,27 @@ class _ReportsScreenState extends State<ReportsScreen> {
         _tile('Ingredient cost used', money(cost), sub: 'From sales, at average cost'),
       ]),
       const SizedBox(height: 16),
+      RankedBars(
+        title: 'Biggest ingredient costs',
+        points: [
+          for (final r in ([...rows]..sort((a, b) => n(b['cost_used']).compareTo(n(a['cost_used'])))).take(10))
+            ChartPoint('${r['item']}', n(r['cost_used']).toDouble(),
+                detail: 'Used ${_q(r['sold'])} ${r['unit']}, wasted ${_q(r['waste'])} ${r['unit']}')
+        ],
+        format: (v) => money(v),
+        note: 'Where your food spend goes. Tap a bar for the quantity used.',
+      ),
+      RankedBars(
+        title: 'Waste',
+        points: [
+          for (final r in ([...rows.where((r) => n(r['waste']) > 0)]
+                ..sort((a, b) => (n(b['waste']) * 1).compareTo(n(a['waste']) * 1))).take(10))
+            ChartPoint('${r['item']}', n(r['waste']).toDouble(), detail: r['unit'] == null ? '' : 'Unit: ${r['unit']}')
+        ],
+        format: (v) => _q(v),
+        colorFor: (_) => Brand.red,
+        note: 'Quantity written off as waste in the period.',
+      ),
       _section(
           'Stock movement by item',
           _table(
@@ -513,6 +690,22 @@ class _ReportsScreenState extends State<ReportsScreen> {
         _tile('Purchased in period', money(total), sub: 'Posted GRVs, incl. VAT'),
       ]),
       const SizedBox(height: 16),
+      PieCard(
+        title: 'Where your stock money is',
+        slices: [for (final v in _list('valuation')) ChartPoint('${v['category']}', n(v['value']).toDouble())],
+        format: (v) => money(v),
+        note: 'Tap a slice to see its value.',
+      ),
+      BarCard(
+        title: 'Purchases by supplier',
+        points: [
+          for (final p in purchases)
+            ChartPoint('${p['supplier']}'.split(' ').first, n(p['total']).toDouble(),
+                detail: '${p['supplier']}, ${p['grvs']} deliveries')
+        ],
+        format: (v) => money(v),
+        color: const Color(0xFF1E7A4A),
+      ),
       _section(
           'Stock value by category',
           _table(['Category', 'Items', 'Value'], [
