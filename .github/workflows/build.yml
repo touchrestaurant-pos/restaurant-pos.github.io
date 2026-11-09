@@ -1,0 +1,76 @@
+name: Build apps
+
+# Builds the web app, Android APK and Windows app on GitHub's servers,
+# so nothing has to be installed on your own computer.
+# Runs on every push to main, or press "Run workflow" on the Actions tab.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Create platform folders
+        run: |
+          flutter create --platforms=web --project-name restaurant_pos --org com.restaurantpos .
+          git checkout -- lib pubspec.yaml
+          rm -rf test
+      - run: flutter pub get
+      - run: flutter analyze --no-fatal-infos --no-fatal-warnings
+      - run: flutter build web --release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: restaurant-pos-web
+          path: build/web
+
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Create platform folders
+        run: |
+          flutter create --platforms=android --project-name restaurant_pos --org com.restaurantpos .
+          git checkout -- lib pubspec.yaml
+          rm -rf test
+      - run: flutter pub get
+      - run: flutter build apk --release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: restaurant-pos-android-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Create platform folders
+        shell: bash
+        run: |
+          flutter create --platforms=windows --project-name restaurant_pos --org com.restaurantpos .
+          git checkout -- lib pubspec.yaml
+          rm -rf test
+      - run: flutter pub get
+      - run: flutter build windows --release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: restaurant-pos-windows
+          path: build/windows/x64/runner/Release

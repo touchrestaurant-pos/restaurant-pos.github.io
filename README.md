@@ -13,7 +13,14 @@ One Flutter app for Android, iOS, Windows, Mac and web. Works offline and syncs 
 | Supervisor | Cashier screens plus voids, refunds, cash-up, approve adjustments |
 | Admin | Everything, plus menu, recipes, staff and company settings (name, details, logo) |
 
-## First-time setup (on your computer)
+## Build without installing anything
+
+GitHub builds the apps for you (`.github/workflows/build.yml`). Open the repo's **Actions**
+tab, click the latest "Build apps" run, and download from **Artifacts**:
+`restaurant-pos-web`, `restaurant-pos-android-apk`, `restaurant-pos-windows`.
+Press **Run workflow** to build again at any time.
+
+## Building on your own computer (optional)
 
 1. Install Flutter: https://docs.flutter.dev/get-started/install
 2. In this folder run, once, to create the Android / iOS / web / desktop folders:
