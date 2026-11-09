@@ -27,26 +27,29 @@ class _KitchenScreenState extends State<KitchenScreen> {
   Timer? _tick;
   String _filter = 'all'; // all, new, progress, special
   bool _alertOpen = false;
+  Future<void>? _acking;
 
-  List<String> get _acked =>
-      ((LocalStore.getMeta('kitchen_ack') as List?) ?? const []).cast<String>();
-
-  /// Orders cancelled in the last 12 hours that this screen has not acknowledged.
+  /// Orders cancelled in the last 12 hours that no kitchen screen has acknowledged yet.
+  /// The acknowledgement is stored on the order itself, so it shows once for everyone.
   List<Map<String, dynamic>> _cancelled() {
     final cutoff = DateTime.now().subtract(const Duration(hours: 12));
-    final acked = _acked;
     return LocalStore.rows('orders').where((o) {
       final t = parseTime(o['voided_at']);
       return o['status'] == 'void' &&
+          o['cancel_ack_at'] == null &&
           t != null &&
-          t.isAfter(cutoff) &&
-          !acked.contains(o['id']);
+          t.isAfter(cutoff);
     }).toList()
       ..sort((a, b) => '${a['voided_at']}'.compareTo('${b['voided_at']}'));
   }
 
-  Future<void> _ack(Iterable<String> ids) =>
-      LocalStore.setMeta('kitchen_ack', [..._acked, ...ids]);
+  Future<void> _ack(Iterable<String> ids) async {
+    final now = DateTime.now().toUtc().toIso8601String();
+    for (final id in ids) {
+      await LocalStore.upsert('orders', {'id': id, 'cancel_ack_at': now});
+    }
+    SyncService.instance.syncNow();
+  }
 
   void _maybeAlert(List<Map<String, dynamic>> cancelled) {
     if (_alertOpen || cancelled.isEmpty) return;
@@ -81,13 +84,20 @@ class _KitchenScreenState extends State<KitchenScreen> {
           actions: [
             FilledButton(
               style: FilledButton.styleFrom(backgroundColor: _red, foregroundColor: Colors.white),
-              onPressed: () => Navigator.pop(ctx),
+              onPressed: () {
+                _acking = _ack(cancelled.map((o) => o['id'] as String));
+                Navigator.pop(ctx);
+              },
               child: const Text('OK, understood'),
             ),
           ],
         ),
       );
-      await _ack(cancelled.map((o) => o['id'] as String));
+      // Wait until the acknowledgement is saved, so the popup cannot come back.
+      try {
+        await _acking;
+      } catch (_) {}
+      _acking = null;
       _alertOpen = false;
       if (mounted) setState(() {});
     });
