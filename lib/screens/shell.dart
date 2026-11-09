@@ -145,27 +145,62 @@ class _ShellState extends State<Shell> {
       body: Row(
         children: [
           if (showNav && wide)
-            NavigationRail(
-              backgroundColor: Brand.navy,
-              indicatorColor: Brand.navyLight,
-              selectedIndex: _index,
-              labelType: NavigationRailLabelType.all,
-              selectedIconTheme: const IconThemeData(color: Brand.gold),
-              unselectedIconTheme: const IconThemeData(color: Color(0xFFB8C3DE)),
-              selectedLabelTextStyle: const TextStyle(
-                  color: Brand.gold, fontWeight: FontWeight.w700, fontSize: 12),
-              unselectedLabelTextStyle:
-                  const TextStyle(color: Color(0xFFB8C3DE), fontSize: 12),
-              onDestinationSelected: (i) => setState(() => _index = i),
-              destinations: [
-                for (final t in tabs)
-                  NavigationRailDestination(icon: Icon(t.icon), label: Text(t.label)),
-              ],
+            Container(
+              color: Brand.navy,
+              child: LayoutBuilder(
+                builder: (context, box) => SingleChildScrollView(
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(minHeight: box.maxHeight),
+                    child: IntrinsicHeight(
+                      child: NavigationRail(
+                        backgroundColor: Brand.navy,
+                        indicatorColor: Brand.navyLight,
+                        selectedIndex: _index,
+                        labelType: NavigationRailLabelType.all,
+                        selectedIconTheme: const IconThemeData(color: Brand.gold),
+                        unselectedIconTheme: const IconThemeData(color: Color(0xFFB8C3DE)),
+                        selectedLabelTextStyle: const TextStyle(
+                            color: Brand.gold, fontWeight: FontWeight.w700, fontSize: 12),
+                        unselectedLabelTextStyle:
+                            const TextStyle(color: Color(0xFFB8C3DE), fontSize: 12),
+                        onDestinationSelected: (i) => setState(() => _index = i),
+                        destinations: [
+                          for (final t in tabs)
+                            NavigationRailDestination(icon: Icon(t.icon), label: Text(t.label)),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
             ),
           Expanded(child: tabs[_index].build()),
         ],
       ),
-      bottomNavigationBar: showNav && !wide
+      drawer: showNav && !wide && tabs.length > 5
+          ? Drawer(
+              backgroundColor: Brand.navy,
+              child: SafeArea(
+                child: ListView(children: [
+                  for (var i = 0; i < tabs.length; i++)
+                    ListTile(
+                      leading: Icon(tabs[i].icon,
+                          color: i == _index ? Brand.gold : const Color(0xFFB8C3DE)),
+                      title: Text(tabs[i].label,
+                          style: TextStyle(
+                              color: i == _index ? Brand.gold : Colors.white,
+                              fontWeight: i == _index ? FontWeight.w700 : FontWeight.w400)),
+                      selected: i == _index,
+                      onTap: () {
+                        setState(() => _index = i);
+                        Navigator.pop(context);
+                      },
+                    ),
+                ]),
+              ),
+            )
+          : null,
+      bottomNavigationBar: showNav && !wide && tabs.length <= 5
           ? NavigationBarTheme(
               data: const NavigationBarThemeData(
                 labelTextStyle: WidgetStatePropertyAll(
