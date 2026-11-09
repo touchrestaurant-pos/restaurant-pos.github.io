@@ -16,17 +16,22 @@ class SpecialRequestsScreen extends StatelessWidget {
       builder: (_) => _EditDialog(existing: existing),
     );
     if (result == null) return;
-    await LocalStore.upsert('modifiers', {
-      'id': existing?['id'] ?? LocalStore.newId(),
+    final fields = {
       'name': result['name'],
       'price_delta': result['price_delta'],
-      'active': existing?['active'] ?? true,
-    });
+      'stock_item_id': result['stock_item_id'],
+      'stock_qty': result['stock_qty'],
+    };
+    if (existing == null) {
+      await LocalStore.insert('modifiers', {'id': LocalStore.newId(), ...fields, 'active': true});
+    } else {
+      await LocalStore.patch('modifiers', existing['id'], fields);
+    }
     SyncService.instance.syncNow();
   }
 
   Future<void> _toggle(Map<String, dynamic> m, bool v) async {
-    await LocalStore.upsert('modifiers', {...m, 'active': v});
+    await LocalStore.patch('modifiers', m['id'], {'active': v});
     SyncService.instance.syncNow();
   }
 
@@ -81,7 +86,7 @@ class SpecialRequestsScreen extends StatelessWidget {
               ),
               const SizedBox(height: 4),
               const Text(
-                  'These appear as quick buttons when the cashier adds a special request. An extra charge is added to the item price. Cashiers can still type their own note.',
+                  'These appear as quick buttons when the cashier adds a special request. An extra charge is added to the item price. Link a request to a stock item so stock is right: "Extra cheese" uses cheese, "No onion" saves onion. Cashiers can still type their own note.',
                   style: TextStyle(color: Brand.muted)),
               const SizedBox(height: 16),
               Expanded(
@@ -111,9 +116,13 @@ class SpecialRequestsScreen extends StatelessWidget {
                                                 fontSize: 16,
                                                 color: active ? Brand.navy : Brand.muted)),
                                         Text(
-                                            extra > 0
-                                                ? 'Extra charge ${money(extra)}'
-                                                : 'No extra charge',
+                                            [
+                                              extra > 0 ? 'Extra charge ${money(extra)}' : 'No extra charge',
+                                              if (m['stock_item_id'] != null)
+                                                '${n(m['stock_qty']) >= 0 ? 'uses' : 'saves'} ${n(m['stock_qty']).abs()} '
+                                                    '${LocalStore.row('stock_items', m['stock_item_id'])?['unit'] ?? ''} '
+                                                    '${LocalStore.row('stock_items', m['stock_item_id'])?['name'] ?? ''}',
+                                            ].join(' · '),
                                             style: const TextStyle(
                                                 color: Brand.muted, fontSize: 12)),
                                       ],
@@ -160,6 +169,9 @@ class _EditDialog extends StatefulWidget {
 class _EditDialogState extends State<_EditDialog> {
   late final TextEditingController _name;
   late final TextEditingController _extra;
+  late final TextEditingController _qty;
+  String? _stockId;
+  bool _saves = false;
   String? _error;
 
   @override
@@ -168,12 +180,17 @@ class _EditDialogState extends State<_EditDialog> {
     _name = TextEditingController(text: '${widget.existing?['name'] ?? ''}');
     final d = n(widget.existing?['price_delta']);
     _extra = TextEditingController(text: d > 0 ? d.toStringAsFixed(2) : '');
+    _stockId = widget.existing?['stock_item_id'] as String?;
+    final q = n(widget.existing?['stock_qty']);
+    _saves = q < 0;
+    _qty = TextEditingController(text: q == 0 ? '' : '${q.abs()}');
   }
 
   @override
   void dispose() {
     _name.dispose();
     _extra.dispose();
+    _qty.dispose();
     super.dispose();
   }
 
@@ -195,7 +212,17 @@ class _EditDialogState extends State<_EditDialog> {
       setState(() => _error = 'The extra charge cannot be negative.');
       return;
     }
-    Navigator.pop(context, {'name': name, 'price_delta': round2(extra)});
+    final qty = double.tryParse(_qty.text.trim().replaceAll(',', '.')) ?? 0;
+    if (_stockId != null && qty <= 0) {
+      setState(() => _error = 'Enter how much of the stock item one request uses or saves.');
+      return;
+    }
+    Navigator.pop(context, {
+      'name': name,
+      'price_delta': round2(extra),
+      'stock_item_id': _stockId,
+      'stock_qty': _stockId == null ? 0 : (_saves ? -qty : qty),
+    });
   }
 
   @override
@@ -203,8 +230,8 @@ class _EditDialogState extends State<_EditDialog> {
     return AlertDialog(
       title: Text(widget.existing == null ? 'Add special request' : 'Edit special request'),
       content: SizedBox(
-        width: 380,
-        child: Column(
+        width: 400,
+        child: SingleChildScrollView(child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             TextField(
@@ -222,12 +249,46 @@ class _EditDialogState extends State<_EditDialog> {
                   prefixText: 'R ',
                   helperText: 'Leave empty for no charge'),
             ),
+            const SizedBox(height: 16),
+            DropdownButtonFormField<String?>(
+              initialValue: _stockId,
+              isExpanded: true,
+              decoration: const InputDecoration(labelText: 'Affects stock (optional)'),
+              items: [
+                const DropdownMenuItem<String?>(value: null, child: Text('Does not change stock')),
+                for (final si in (LocalStore.rows('stock_items').where((x) => x['active'] != false).toList()
+                  ..sort((a, b) => '${a['name']}'.compareTo('${b['name']}'))))
+                  DropdownMenuItem<String?>(value: si['id'] as String, child: Text('${si['name']} (${si['unit']})')),
+              ],
+              onChanged: (v) => setState(() => _stockId = v),
+            ),
+            if (_stockId != null) ...[
+              const SizedBox(height: 8),
+              SegmentedButton<bool>(
+                showSelectedIcon: false,
+                segments: const [
+                  ButtonSegment(value: false, label: Text('Uses more')),
+                  ButtonSegment(value: true, label: Text('Uses less')),
+                ],
+                selected: {_saves},
+                onSelectionChanged: (v) => setState(() => _saves = v.first),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _qty,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                decoration: InputDecoration(
+                    labelText: 'Quantity per item',
+                    suffixText: '${LocalStore.row('stock_items', _stockId)?['unit'] ?? ''}',
+                    helperText: _saves ? 'For example "No onion" saves 0.02 kg onion' : 'For example "Extra cheese" uses 1 slice'),
+              ),
+            ],
             if (_error != null) ...[
               const SizedBox(height: 12),
               Text(_error!, style: const TextStyle(color: Brand.red)),
             ],
           ],
-        ),
+        )),
       ),
       actions: [
         TextButton(

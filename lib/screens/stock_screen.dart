@@ -5,6 +5,7 @@ import '../data/local_store.dart';
 import '../data/repo.dart';
 import '../data/sync_service.dart';
 import '../theme.dart';
+import 'purchase_orders.dart';
 
 SupabaseClient get _db => Supabase.instance.client;
 
@@ -62,7 +63,7 @@ class StockScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return DefaultTabController(
-      length: 3,
+      length: 4,
       child: Column(children: const [
         Padding(
           padding: EdgeInsets.fromLTRB(20, 16, 20, 0),
@@ -77,10 +78,10 @@ class StockScreen extends StatelessWidget {
           tabAlignment: TabAlignment.start,
           labelColor: Brand.navy,
           indicatorColor: Brand.gold,
-          tabs: [Tab(text: 'Stock levels'), Tab(text: 'Receive stock (GRV)'), Tab(text: 'Suppliers')],
+          tabs: [Tab(text: 'Stock levels'), Tab(text: 'Purchase orders'), Tab(text: 'Receive stock (GRV)'), Tab(text: 'Suppliers')],
         ),
         Expanded(
-          child: TabBarView(children: [_LevelsTab(), _GrvTab(), _SuppliersTab()]),
+          child: TabBarView(children: [_LevelsTab(), PurchaseOrdersTab(), _GrvTab(), _SuppliersTab()]),
         ),
       ]),
     );
@@ -133,7 +134,46 @@ class _LevelsTabState extends State<_LevelsTab> {
                   onSelected: (_) => setState(() => _filter = key)),
             );
 
+        final today = DateTime.now();
+        final soon = DateTime(today.year, today.month, today.day + 3);
+        final posted = {for (final g in LocalStore.rows('grvs')) if (g['status'] == 'posted') g['id']: g};
+        final expiring = LocalStore.rows('grv_lines').where((l) {
+          final d = DateTime.tryParse('${l['expiry_date'] ?? ''}');
+          final it = LocalStore.row('stock_items', l['stock_item_id']);
+          return d != null &&
+              posted.containsKey(l['grv_id']) &&
+              !d.isAfter(soon) &&
+              d.isAfter(today.subtract(const Duration(days: 7))) &&
+              n(it?['qty_on_hand']) > 0;
+        }).toList()
+          ..sort((a, b) => '${a['expiry_date']}'.compareTo('${b['expiry_date']}'));
+        final negative = all.where((i) => n(i['qty_on_hand']) < 0).toList();
         return ListView(padding: const EdgeInsets.all(20), children: [
+          if (expiring.isNotEmpty)
+            Card(
+              color: const Color(0xFFFFF4D6),
+              child: Padding(
+                padding: const EdgeInsets.all(14),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  const Text('Use first: expiring within 3 days',
+                      style: TextStyle(fontWeight: FontWeight.w800, color: Color(0xFF7A4B00))),
+                  for (final l in expiring.take(8))
+                    Text(
+                        '${LocalStore.row('stock_items', l['stock_item_id'])?['name']} · expires ${l['expiry_date']} '
+                        '(${posted[l['grv_id']]?['grv_no'] ?? ''}, received ${_qty(l['received_qty'])})'),
+                ]),
+              ),
+            ),
+          if (negative.isNotEmpty)
+            Card(
+              color: const Color(0xFFFDE7EA),
+              child: Padding(
+                padding: const EdgeInsets.all(14),
+                child: Text(
+                    'Below zero: ${negative.map((i) => i['name']).join(', ')}. More was sold than was received, so a delivery was not captured or a recipe is wrong. Do a stock count.',
+                    style: const TextStyle(color: Brand.red, fontWeight: FontWeight.w600)),
+              ),
+            ),
           Wrap(spacing: 12, runSpacing: 12, crossAxisAlignment: WrapCrossAlignment.center, children: [
             SizedBox(
               width: 260,
@@ -299,6 +339,9 @@ class _LevelsTabState extends State<_LevelsTab> {
     final cost = TextEditingController(text: item == null ? '' : '${n(item['avg_cost'])}');
     String? supplier = item?['supplier_id'] as String?;
     bool active = item?['active'] != false;
+    final packUnit = TextEditingController(text: '${item?['purchase_unit'] ?? ''}');
+    final packFactor = TextEditingController(
+        text: item == null || n(item['purchase_factor']) <= 1 ? '' : _qty(item['purchase_factor']));
     final cats = {for (final i in _items()) if ('${i['category'] ?? ''}'.isNotEmpty) '${i['category']}'}.toList()..sort();
     final ok = await showDialog<bool>(
       context: context,
@@ -351,6 +394,23 @@ class _LevelsTabState extends State<_LevelsTab> {
                   ],
                   onChanged: (v) => set(() => supplier = v),
                 ),
+                const SizedBox(height: 8),
+                Row(children: [
+                  Expanded(
+                    child: TextField(
+                        controller: packUnit,
+                        decoration: const InputDecoration(labelText: 'Bought as (optional)', hintText: 'case, box, bag')),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: TextField(
+                        controller: packFactor,
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                        decoration: InputDecoration(labelText: 'Units in one', suffixText: unit.text)),
+                  ),
+                ]),
+                const Text('For example a case of 24 cans: when receiving stock you can enter cases.',
+                    style: TextStyle(color: Brand.muted, fontSize: 12)),
                 SwitchListTile(
                     contentPadding: EdgeInsets.zero,
                     title: const Text('Active'),
@@ -378,6 +438,10 @@ class _LevelsTabState extends State<_LevelsTab> {
       'min_level': double.parse(min.text.replaceAll(',', '.')),
       'supplier_id': supplier,
       'active': active,
+      'purchase_unit': packUnit.text.trim().isEmpty ? null : packUnit.text.trim(),
+      'purchase_factor': (double.tryParse(packFactor.text.replaceAll(',', '.')) ?? 1) > 0
+          ? (double.tryParse(packFactor.text.replaceAll(',', '.')) ?? 1)
+          : 1,
       if (item == null) 'avg_cost': double.tryParse(cost.text.replaceAll(',', '.')) ?? 0,
     };
     await _online(context, () async {
@@ -453,7 +517,7 @@ class _GrvTab extends StatelessWidget {
 
   Future<void> _open(BuildContext context, Map<String, dynamic>? grv) async {
     await Navigator.of(context).push(MaterialPageRoute(
-        fullscreenDialog: true, builder: (_) => _GrvEditor(grv: grv)));
+        fullscreenDialog: true, builder: (_) => GrvEditor(grv: grv)));
   }
 }
 
@@ -468,20 +532,22 @@ class _GrvLine {
   final TextEditingController cost;
   DateTime? expiry;
 
+  final packs = TextEditingController();
+  final packCost = TextEditingController();
   double get recQty => double.tryParse(received.text.replaceAll(',', '.')) ?? 0;
   double get unitCost => double.tryParse(cost.text.replaceAll(',', '.')) ?? 0;
   double get total => round2(recQty * unitCost);
 }
 
-class _GrvEditor extends StatefulWidget {
-  const _GrvEditor({this.grv});
+class GrvEditor extends StatefulWidget {
+  const GrvEditor({this.grv});
   final Map<String, dynamic>? grv;
 
   @override
-  State<_GrvEditor> createState() => _GrvEditorState();
+  State<GrvEditor> createState() => GrvEditorState();
 }
 
-class _GrvEditorState extends State<_GrvEditor> {
+class GrvEditorState extends State<GrvEditor> {
   late final bool _posted = widget.grv?['status'] == 'posted';
   String? _supplier;
   final _note = TextEditingController();
@@ -785,6 +851,36 @@ class _GrvEditorState extends State<_GrvEditor> {
             Text('On hand ${_qty(item?['qty_on_hand'])} $unit', style: const TextStyle(color: Brand.muted, fontSize: 12)),
           ]),
         ),
+        if (n(item?['purchase_factor']) > 1) ...[
+          SizedBox(
+              width: 120,
+              child: TextField(
+                  controller: l.packs,
+                  enabled: !_posted,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  onChanged: (v) => setState(() {
+                    final p = double.tryParse(v.replaceAll(',', '.'));
+                    if (p != null) l.received.text = _qty(p * n(item?['purchase_factor']));
+                  }),
+                  decoration: InputDecoration(
+                      labelText: '${item?['purchase_unit'] ?? 'Packs'} received',
+                      helperText: '1 = ${_qty(item?['purchase_factor'])} $unit',
+                      isDense: true))),
+          SizedBox(
+              width: 120,
+              child: TextField(
+                  controller: l.packCost,
+                  enabled: !_posted,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  onChanged: (v) => setState(() {
+                    final c = double.tryParse(v.replaceAll(',', '.'));
+                    if (c != null) {
+                      l.cost.text = (c / n(item?['purchase_factor'])).toStringAsFixed(4);
+                    }
+                  }),
+                  decoration: InputDecoration(
+                      labelText: 'Cost per ${item?['purchase_unit'] ?? 'pack'}', prefixText: 'R', isDense: true))),
+        ],
         SizedBox(
             width: 100,
             child: TextField(

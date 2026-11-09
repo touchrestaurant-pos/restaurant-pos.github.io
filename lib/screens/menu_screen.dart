@@ -42,7 +42,7 @@ Map<String, dynamic>? _stockItem(dynamic id) {
 double _portionCost(String productId) {
   var total = 0.0;
   for (final l in LocalStore.rows('recipe_lines').where((l) => l['product_id'] == productId)) {
-    total += n(l['qty']) * n(_stockItem(l['stock_item_id'])?['avg_cost']);
+    total += n(l['qty']) * (1 + n(l['waste_pct']) / 100) * n(_stockItem(l['stock_item_id'])?['avg_cost']);
   }
   return total;
 }
@@ -312,10 +312,17 @@ class _MenuScreenState extends State<MenuScreen> {
 }
 
 class _RecipeRow {
-  _RecipeRow(this.itemId, String qty) : qty = TextEditingController(text: qty);
+  _RecipeRow(this.itemId, String qty, [String waste = ''])
+      : qty = TextEditingController(text: qty),
+        waste = TextEditingController(text: waste);
   final String itemId;
   final TextEditingController qty;
+
+  /// Trimming and cooking loss, so stock drops by what is really used.
+  final TextEditingController waste;
   double get q => double.tryParse(qty.text.replaceAll(',', '.')) ?? 0;
+  double get w => (double.tryParse(waste.text.replaceAll(',', '.')) ?? 0).clamp(0, 100).toDouble();
+  double get used => q * (1 + w / 100);
 }
 
 /// Ingredients used by one portion of a product, with live cost and margin.
@@ -335,12 +342,13 @@ class _RecipeDialogState extends State<_RecipeDialog> {
   void initState() {
     super.initState();
     for (final l in LocalStore.rows('recipe_lines').where((l) => l['product_id'] == widget.product['id'])) {
-      _rows.add(_RecipeRow(l['stock_item_id'] as String, _qty(l['qty'])));
+      _rows.add(_RecipeRow(l['stock_item_id'] as String, _qty(l['qty']),
+          n(l['waste_pct']) > 0 ? _qty(l['waste_pct']) : ''));
     }
   }
 
   double get _cost => _rows.fold<double>(
-      0, (s, r) => s + r.q * n(_stockItem(r.itemId)?['avg_cost']).toDouble());
+      0, (s, r) => s + r.used * n(_stockItem(r.itemId)?['avg_cost']).toDouble());
 
   Future<void> _add() async {
     final used = _rows.map((r) => r.itemId).toSet();
@@ -396,7 +404,7 @@ class _RecipeDialogState extends State<_RecipeDialog> {
       await _db.from('recipe_lines').delete().eq('product_id', id);
       if (_rows.isNotEmpty) {
         await _db.from('recipe_lines').insert([
-          for (final r in _rows) {'product_id': id, 'stock_item_id': r.itemId, 'qty': r.q}
+          for (final r in _rows) {'product_id': id, 'stock_item_id': r.itemId, 'qty': r.q, 'waste_pct': r.w}
         ]);
       }
     });
@@ -418,7 +426,7 @@ class _RecipeDialogState extends State<_RecipeDialog> {
         width: 560,
         child: SingleChildScrollView(
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-            const Text('What one portion uses. Selling the item takes these amounts off stock.',
+            const Text('What one portion uses. Waste % adds trimming or cooking loss (for example 10% for chicken on the bone). Selling the item takes these amounts off stock.',
                 style: TextStyle(color: Brand.muted)),
             const SizedBox(height: 12),
             if (_rows.isEmpty)
@@ -445,10 +453,20 @@ class _RecipeDialogState extends State<_RecipeDialog> {
                           suffixText: '${_stockItem(_rows[i].itemId)?['unit'] ?? ''}'),
                     ),
                   ),
+                  const SizedBox(width: 6),
+                  SizedBox(
+                    width: 74,
+                    child: TextField(
+                      controller: _rows[i].waste,
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      onChanged: (_) => setState(() {}),
+                      decoration: const InputDecoration(isDense: true, suffixText: '%', hintText: 'waste'),
+                    ),
+                  ),
                   SizedBox(
                     width: 80,
                     child: Text(
-                        money(_rows[i].q * n(_stockItem(_rows[i].itemId)?['avg_cost']).toDouble()),
+                        money(_rows[i].used * n(_stockItem(_rows[i].itemId)?['avg_cost']).toDouble()),
                         textAlign: TextAlign.right,
                         style: const TextStyle(color: Brand.muted)),
                   ),
