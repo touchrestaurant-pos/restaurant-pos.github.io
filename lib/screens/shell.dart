@@ -10,6 +10,7 @@ import 'dashboard_screen.dart';
 import 'kitchen_screen.dart';
 import '../data/sync_service.dart';
 import 'reports_screen.dart';
+import 'menu_screen.dart';
 import 'settings_screen.dart';
 import 'special_requests_screen.dart';
 import 'staff_screen.dart';
@@ -47,6 +48,7 @@ class _ShellState extends State<Shell> {
     const dash = _Tab('Dashboard', Icons.dashboard_outlined, _dashboard);
     const staff = _Tab('Staff', Icons.badge_outlined, _staff);
     const requests = _Tab('Requests', Icons.edit_note, _requests);
+    const menu = _Tab('Menu', Icons.restaurant_menu, _menu);
     const stock = _Tab('Stock', Icons.inventory_2_outlined, _stock);
     const reports = _Tab('Reports', Icons.bar_chart, _reports);
     const settings = _Tab('Settings', Icons.settings_outlined, _settings);
@@ -60,7 +62,7 @@ class _ShellState extends State<Shell> {
       case 'supervisor':
         return const [order, kitchen, dash];
       case 'admin':
-        return const [dash, order, kitchen, stock, reports, requests, staff, settings];
+        return const [dash, order, kitchen, menu, stock, reports, requests, staff, settings];
       default:
         return const [dash];
     }
@@ -71,6 +73,7 @@ class _ShellState extends State<Shell> {
   static Widget _dashboard() => const DashboardScreen();
   static Widget _staff() => const StaffScreen();
   static Widget _requests() => const SpecialRequestsScreen();
+  static Widget _menu() => const MenuScreen();
   static Widget _stock() => const StockScreen();
   static Widget _reports() => const ReportsScreen();
   static Widget _settings() => const SettingsScreen();
