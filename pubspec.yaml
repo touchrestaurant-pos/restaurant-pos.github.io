@@ -1,0 +1,24 @@
+name: restaurant_pos
+description: Restaurant POS for cashier, kitchen, stock and admin. Offline-first, syncs with Supabase.
+publish_to: "none"
+version: 0.1.0+1
+
+environment:
+  sdk: ">=3.4.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  supabase_flutter: ^2.8.0
+  hive_ce_flutter: ^2.2.0
+  connectivity_plus: ^6.1.0
+  uuid: ^4.5.1
+  intl: ^0.19.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+
+flutter:
+  uses-material-design: true
