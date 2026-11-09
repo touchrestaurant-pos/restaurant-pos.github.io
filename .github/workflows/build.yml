@@ -26,6 +26,23 @@ jobs:
           flutter create --platforms=android --project-name restaurant_pos --org com.restaurantpos .
           git checkout -- lib pubspec.yaml
           for d in mdpi hdpi xhdpi xxhdpi xxxhdpi; do cp branding/android/mipmap-$d/ic_launcher.png android/app/src/main/res/mipmap-$d/ic_launcher.png; done
+          # Some plugins are built against an older Android version than others need; raise them all to 36.
+          cat > /tmp/patch.kts <<'EOF'
+          subprojects {
+              afterEvaluate {
+                  val ext = extensions.findByName("android")
+                  if (ext != null) {
+                      try {
+                          ext.javaClass.getMethod("setCompileSdkVersion", Int::class.javaPrimitiveType).invoke(ext, 36)
+                      } catch (e: Exception) {
+                          println("Could not raise compileSdk for " + project.name + ": " + e)
+                      }
+                  }
+              }
+          }
+          EOF
+          sed -i 's/^          //' /tmp/patch.kts
+          cat /tmp/patch.kts android/build.gradle.kts > /tmp/root.kts && cp /tmp/root.kts android/build.gradle.kts
           rm -rf test
       - run: flutter pub get
       - name: Build APK (retries, because downloads from GitHub and Maven sometimes time out)
