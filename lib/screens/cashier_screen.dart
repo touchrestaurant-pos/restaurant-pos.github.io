@@ -5,6 +5,7 @@ import '../data/local_store.dart';
 import '../data/repo.dart';
 import '../data/sync_service.dart';
 import '../theme.dart';
+import '../receipt/receipt_service.dart';
 import '../widgets/payment_dialog.dart';
 
 /// Take an order: pick items, add special requests, pay now or pay later.
@@ -85,7 +86,21 @@ class _CashierScreenState extends State<CashierScreen> {
     if (change != null && n(change) > 0) msg.write(' · change ${money(n(change))}');
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(content: Text(msg.toString())));
+      ..showSnackBar(SnackBar(
+        content: Text(msg.toString()),
+        duration: const Duration(seconds: 8),
+        action: SnackBarAction(
+          label: 'Receipt',
+          onPressed: () {
+            for (final o in LocalStore.rows('orders')) {
+              if (o['order_ref'] == ref) {
+                showReceiptDialog(context, o['id'] as String);
+                return;
+              }
+            }
+          },
+        ),
+      ));
   }
 
   Future<void> _showCancel() async {
