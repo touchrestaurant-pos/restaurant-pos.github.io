@@ -24,11 +24,23 @@ account signs in with its email address.
 Receipts: view on screen, print to an 80 mm or 58 mm slip printer, download as PDF, or open an
 email with the receipt written in it.
 
+## What's in version 1.2
+
+- Offline: each device sends only the fields it changed, so an old copy on one till can never undo a newer change. Changes the server refuses are listed under the status pill ("not saved") with Retry and Discard. Only one browser tab per device runs the till.
+- Till: discounts with a reason (cashiers up to 10%), split bills and split evenly, tips, card as a simple tender, add or remove items on open orders, a Tables view, sell-anyway when stock shows zero.
+- Cancelling a paid order needs a supervisor or admin and records the refund at the same time.
+- Receipts: TAX INVOICE heading when a VAT number is set and a sequential invoice number from the server; optional automatic printing; one-click printing to a chosen printer on the Windows and Android apps.
+- Kitchen: beep for new orders and added items, keeps the screen awake in the browser, shows ADDED and REMOVED items.
+- Stock: extras can use or save stock, recipe waste %, buying in packs, expiry and below-zero warnings, purchase orders (from the buying list, email or PDF, then receive as a delivery).
+- Reports: sales after refunds, discounts, tips, sales by staff, food cost at the time of sale, a saved copy for offline viewing. Cash-up per staff member with tips.
+- Admin: grouped menu, backup download, clear test sales before going live, problem log from every till.
+- Automated tests run on every build; a workflow keeps the free database from pausing; Windows installer.
+
 ## Getting the apps
 
 GitHub builds the apps for you (`.github/workflows/build.yml`). Open the repo's **Actions**
 tab, click the latest "Build apps" run, and download from **Artifacts**:
-`restaurant-pos-android-apk` and `restaurant-pos-windows`. Press **Run workflow** to build again.
+`restaurant-pos-android-apk`, `restaurant-pos-windows-installer` (setup file) and `restaurant-pos-windows`. Press **Run workflow** to build again.
 The Android APK must be allowed to install from outside the Play Store on the phone.
 
 ## Building on your own computer (optional)
