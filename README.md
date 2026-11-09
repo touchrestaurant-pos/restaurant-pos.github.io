@@ -3,22 +3,33 @@
 Restaurant POS: cashier, kitchen queue, stock with GRV, recipes, admin and supervisor.
 One Flutter app for Android, iOS, Windows, Mac and web. Works offline and syncs with Supabase.
 
-## Roles
+## Live web app
 
-| Role | Can do |
+https://touchrestaurant-pos.github.io/ (every push to `main` redeploys it).
+
+## Roles and screens
+
+| Role | Screens |
 | --- | --- |
-| Cashier | Take orders, take payment (cash and manual credit card) |
-| Kitchen | See the order queue, special requests, mark items done and orders ready |
-| Stock | Stock master, receive stock (GRV), adjustments |
-| Supervisor | Cashier screens plus voids, refunds, cash-up, approve adjustments |
-| Admin | Everything, plus menu, recipes, staff and company settings (name, details, logo) |
+| Cashier | Order (till), Orders (receipts), Dashboard |
+| Kitchen | Kitchen queue (shows special requests and a popup when an order is cancelled) |
+| Stock | Stock levels and adjustments, Receive stock (GRV), Suppliers, Dashboard |
+| Supervisor | Order, Kitchen, Orders (receipts and refunds), Cash-up, Dashboard |
+| Admin | All of the above plus Menu and recipes, Reports, special requests, Staff, Company settings |
 
-## Build without installing anything
+Staff sign in with a **username and password** (no email). The admin adds staff, can set a new
+password for anyone who forgets theirs, and staff can change their own password. The owner
+account signs in with its email address.
+
+Receipts: view on screen, print to an 80 mm or 58 mm slip printer, download as PDF, or open an
+email with the receipt written in it.
+
+## Getting the apps
 
 GitHub builds the apps for you (`.github/workflows/build.yml`). Open the repo's **Actions**
 tab, click the latest "Build apps" run, and download from **Artifacts**:
-`restaurant-pos-web`, `restaurant-pos-android-apk`, `restaurant-pos-windows`.
-Press **Run workflow** to build again at any time.
+`restaurant-pos-android-apk` and `restaurant-pos-windows`. Press **Run workflow** to build again.
+The Android APK must be allowed to install from outside the Play Store on the phone.
 
 ## Building on your own computer (optional)
 
@@ -44,6 +55,9 @@ Already applied to the `restaurant-pos` Supabase project.
 - Selling an item deducts its recipe ingredients from stock.
 - Posting a GRV adds stock and updates the average cost.
 - Voiding an order puts the stock back.
+- Reports, refunds, cash-ups and receiving stock are calculated and saved on the server
+  (functions `admin_report`, `issue_refund`, `cash_up_summary`, `save_cash_up`, `post_grv`),
+  so they need internet. Selling and the kitchen queue work offline.
 
 ## Security notes
 
