@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../data/local_store.dart';
 import '../data/repo.dart';
 import '../data/sync_service.dart';
+import '../platform/alerts.dart';
 
 const _bg = Color(0xFF101E48);
 const _card = Color(0xFF1E3478);
@@ -27,6 +28,24 @@ class _KitchenScreenState extends State<KitchenScreen> {
   Timer? _tick;
   String _filter = 'all'; // all, new, progress, special
   bool _alertOpen = false;
+  Set<String>? _seen; // orders and added items already announced
+  int _ticks = 0;
+  bool get _soundOn => LocalStore.getMeta('kitchen_sound') != false;
+
+  /// Beeps once for each new order or item added to an order.
+  void _announce(List<Map<String, dynamic>> active) {
+    final now = <String>{};
+    for (final o in active) {
+      now.add('o:${o['id']}');
+      for (final i in OrderRepo.itemsFor(o['id'] as String)) {
+        if (i['added_later'] == true && i['voided'] != true) now.add('i:${i['id']}');
+      }
+    }
+    final seen = _seen;
+    _seen = {...?seen, ...now};
+    if (seen == null) return; // first look: nothing is "new"
+    if (now.difference(seen).isNotEmpty && _soundOn) playAlert();
+  }
   Future<void>? _acking;
 
   /// Orders cancelled in the last 12 hours that no kitchen screen has acknowledged yet.
@@ -106,7 +125,10 @@ class _KitchenScreenState extends State<KitchenScreen> {
   @override
   void initState() {
     super.initState();
+    keepScreenOn(true);
     _tick = Timer.periodic(const Duration(seconds: 1), (_) {
+      _ticks++;
+      if (_ticks % 30 == 0) keepScreenOn(true);
       if (mounted) setState(() {});
     });
   }
@@ -114,6 +136,7 @@ class _KitchenScreenState extends State<KitchenScreen> {
   @override
   void dispose() {
     _tick?.cancel();
+    keepScreenOn(false);
     super.dispose();
   }
 
@@ -127,7 +150,7 @@ class _KitchenScreenState extends State<KitchenScreen> {
     SyncService.instance.syncNow();
   }
 
-  bool _hasSpecial(Map<String, dynamic> order) => OrderRepo.itemsFor(order['id'] as String)
+  bool _hasSpecial(Map<String, dynamic> order) => OrderRepo.liveItemsFor(order['id'] as String)
       .any((i) => ('${i['notes'] ?? ''}').trim().isNotEmpty);
 
   @override
@@ -142,6 +165,7 @@ class _KitchenScreenState extends State<KitchenScreen> {
             .where((o) => o['status'] == 'new' || o['status'] == 'in_progress')
             .toList()
           ..sort((a, b) => '${a['created_at']}'.compareTo('${b['created_at']}'));
+        _announce(active);
         final ready = all.where((o) => o['status'] == 'ready').toList()
           ..sort((a, b) => '${a['ready_at']}'.compareTo('${b['ready_at']}'));
 
@@ -230,6 +254,15 @@ class _KitchenScreenState extends State<KitchenScreen> {
               ),
             ),
           ),
+          IconButton(
+            tooltip: _soundOn ? 'Sound on for new orders (tap to turn off)' : 'Sound off (tap to turn on)',
+            onPressed: () async {
+              await LocalStore.setMeta('kitchen_sound', !_soundOn);
+              if (_soundOn) playAlert(); // also lets the browser play sound from now on
+              setState(() {});
+            },
+            icon: Icon(_soundOn ? Icons.volume_up : Icons.volume_off, color: _soundOn ? _ok : _soft),
+          ),
           if (avg != null)
             Padding(
               padding: const EdgeInsets.only(left: 12),
@@ -251,7 +284,8 @@ class _KitchenScreenState extends State<KitchenScreen> {
 
   Widget _orderCard(Map<String, dynamic> o) {
     final id = o['id'] as String;
-    final items = OrderRepo.itemsFor(id);
+    final allItems = OrderRepo.itemsFor(id);
+    final items = allItems.where((i) => i['voided'] != true).toList();
     final started = o['status'] == 'in_progress';
     final since = parseTime(o['sent_at']) ?? parseTime(o['created_at']) ?? DateTime.now();
     final elapsed = DateTime.now().difference(since);
@@ -307,11 +341,11 @@ class _KitchenScreenState extends State<KitchenScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  for (final i in items)
+                  for (final i in allItems)
                     Padding(
                       padding: const EdgeInsets.only(bottom: 12),
                       child: InkWell(
-                        onTap: () => _toggle(i),
+                        onTap: i['voided'] == true ? null : () => _toggle(i),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
@@ -337,13 +371,19 @@ class _KitchenScreenState extends State<KitchenScreen> {
                                 Expanded(
                                   child: Text('${i['qty']}× ${i['name']}',
                                       style: TextStyle(
-                                          color: i['done'] == true ? _soft : Colors.white,
+                                          color: i['voided'] == true
+                                              ? _red
+                                              : (i['done'] == true ? _soft : Colors.white),
                                           fontWeight: FontWeight.w700,
                                           fontSize: 17,
-                                          decoration: i['done'] == true
+                                          decoration: i['done'] == true || i['voided'] == true
                                               ? TextDecoration.lineThrough
                                               : null)),
                                 ),
+                                if (i['voided'] == true)
+                                  const _Tag('REMOVED', _red, Colors.white)
+                                else if (i['added_later'] == true)
+                                  const _Tag('ADDED', _amber, Color(0xFF1A1300)),
                               ],
                             ),
                             if (('${i['notes'] ?? ''}').trim().isNotEmpty)
@@ -477,4 +517,19 @@ class _KitchenScreenState extends State<KitchenScreen> {
       ),
     );
   }
+}
+
+class _Tag extends StatelessWidget {
+  const _Tag(this.text, this.bg, this.fg);
+  final String text;
+  final Color bg;
+  final Color fg;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        margin: const EdgeInsets.only(left: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(4)),
+        child: Text(text, style: TextStyle(color: fg, fontSize: 11, fontWeight: FontWeight.w800)),
+      );
 }

@@ -32,11 +32,13 @@ jobs:
         run: |
           flutter create --platforms=web --project-name restaurant_pos --org com.restaurantpos .
           git checkout -- lib pubspec.yaml
-          rm -rf test
+          rm -rf test && git checkout -- test
           cp -r branding/web/. web/
           sed -i 's/"name": "restaurant_pos"/"name": "RestoPOS"/; s/"short_name": "restaurant_pos"/"short_name": "RestoPOS"/; s/"background_color": "#[0-9A-Fa-f]*"/"background_color": "#1A2F6C"/; s/"theme_color": "#[0-9A-Fa-f]*"/"theme_color": "#1A2F6C"/' web/manifest.json
       - run: flutter pub get
       - run: flutter analyze --no-fatal-infos --no-fatal-warnings
+      - name: Automated tests
+        run: flutter test
       - run: flutter build web --release --base-href /
       - uses: actions/upload-pages-artifact@v3
         with:

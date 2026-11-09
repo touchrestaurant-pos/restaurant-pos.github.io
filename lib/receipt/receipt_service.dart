@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
@@ -35,7 +36,20 @@ class ReceiptData {
   double get total => n(order['total']).toDouble();
   double get vat => n(order['vat']).toDouble();
   double get subtotal => n(order['subtotal']).toDouble();
+  double get discount => n(order['discount']).toDouble();
+  double get paidAmount => payments.fold<double>(0, (s, p) => s + n(p['amount']).toDouble());
+  double get tips => payments.fold<double>(0, (s, p) => s + n(p['tip']).toDouble());
   DateTime get when => parseTime(order['created_at']) ?? DateTime.now();
+  String get vatNumber => '${company['vat_number'] ?? ''}'.trim();
+
+  /// Sequential number given by the server once the order is paid.
+  String? get invoiceNo {
+    final v = order['invoice_no'];
+    if (v == null) return null;
+    final prefix = '${company['invoice_prefix'] ?? 'INV'}'.trim();
+    return '${prefix.isEmpty ? 'INV' : prefix}-${'$v'.padLeft(6, '0')}';
+  }
+
   String get companyName {
     final t = '${company['trading_name'] ?? ''}'.trim();
     final c = '${company['company_name'] ?? ''}'.trim();
@@ -50,21 +64,127 @@ class ReceiptData {
   }
 
   static ReceiptData? forOrder(String orderId, {double refunded = 0}) {
-    Map<String, dynamic>? order;
-    for (final o in LocalStore.rows('orders')) {
-      if (o['id'] == orderId) order = o;
-    }
+    final order = LocalStore.row('orders', orderId);
     if (order == null) return null;
-    final items = LocalStore.rows('order_items').where((i) => i['order_id'] == orderId).toList()
+    final items = LocalStore.rows('order_items')
+        .where((i) => i['order_id'] == orderId && i['voided'] != true)
+        .toList()
       ..sort((a, b) => '${a['created_at']}'.compareTo('${b['created_at']}'));
-    final pays = LocalStore.rows('payments').where((p) => p['order_id'] == orderId).toList();
-    return ReceiptData(
-        order: order,
-        items: items,
-        payments: pays,
-        company: companyRow() ?? const {},
-        refunded: refunded);
+    final pays = LocalStore.rows('payments').where((p) => p['order_id'] == orderId).toList()
+      ..sort((a, b) => '${a['created_at']}'.compareTo('${b['created_at']}'));
+    return ReceiptData(order: order, items: items, payments: pays, company: companyRow() ?? const {}, refunded: refunded);
   }
+}
+
+/// One line of a receipt. The screen, the PDF and the email are all drawn from
+/// the same list, so they always say the same thing.
+class RLine {
+  const RLine.center(this.left, {this.size = 9, this.bold = false})
+      : right = null,
+        kind = 'center';
+  const RLine.row(this.left, this.right, {this.size = 9, this.bold = false}) : kind = 'row';
+  const RLine.note(this.left)
+      : right = null,
+        size = 8,
+        bold = false,
+        kind = 'note';
+  const RLine.divider()
+      : left = '',
+        right = null,
+        size = 0,
+        bold = false,
+        kind = 'divider';
+  const RLine.gap()
+      : left = '',
+        right = null,
+        size = 0,
+        bold = false,
+        kind = 'gap';
+  final String kind;
+  final String left;
+  final String? right;
+  final double size;
+  final bool bold;
+}
+
+String _method(dynamic m) => m == 'cash' ? 'Cash' : 'Credit card';
+String _lineTotal(Map<String, dynamic> i) => money(n(i['qty']) * n(i['unit_price']));
+final _when = DateFormat('yyyy-MM-dd HH:mm');
+String _rate() => vatRate().toStringAsFixed(vatRate() == vatRate().roundToDouble() ? 0 : 1);
+
+List<RLine> receiptLines(ReceiptData r) {
+  final c = r.company;
+  final taxInvoice = r.vatNumber.isNotEmpty;
+  final footer = '${c['receipt_footer'] ?? ''}'.trim();
+  final lines = <RLine>[
+    RLine.center(r.companyName, size: 13, bold: true),
+    for (final k in ['company_name', 'address', 'phone', 'email'])
+      if ('${c[k] ?? ''}'.trim().isNotEmpty && !(k == 'company_name' && '${c[k]}'.trim() == r.companyName))
+        RLine.center(k == 'phone' ? 'Tel ${c[k]}' : '${c[k]}'.trim(), size: 8),
+    if (taxInvoice) RLine.center('VAT no. ${r.vatNumber}', size: 8),
+    const RLine.divider(),
+    RLine.center(taxInvoice ? 'TAX INVOICE' : 'RECEIPT', size: 11, bold: true),
+    if (r.invoiceNo != null)
+      RLine.center('No. ${r.invoiceNo}', size: 10, bold: true)
+    else if (r.paid)
+      const RLine.center('Invoice number given when synced', size: 7),
+    RLine.center('Order #${r.ref} · ${_when.format(r.when)}', size: 8),
+    if (r.typeText.isNotEmpty) RLine.center(r.typeText, size: 8),
+    if (r.cancelled) const RLine.center('CANCELLED', size: 11, bold: true),
+    if (!r.paid && !r.cancelled)
+      RLine.center(r.paidAmount > 0 ? 'PART PAID' : 'NOT PAID - BILL', size: 11, bold: true),
+    const RLine.divider(),
+    for (final i in r.items) ...[
+      RLine.row('${i['qty']} x ${i['name']}', _lineTotal(i)),
+      if ('${i['notes'] ?? ''}'.trim().isNotEmpty) RLine.note('${i['notes']}'.trim()),
+    ],
+    const RLine.divider(),
+    if (r.discount > 0) ...[
+      RLine.row('Items', money(r.total + r.discount), size: 8),
+      RLine.row(
+          'Discount${'${r.order['discount_reason'] ?? ''}'.trim().isEmpty ? '' : ' (${r.order['discount_reason']})'}',
+          '-${money(r.discount)}',
+          size: 8),
+    ],
+    RLine.row('TOTAL (incl. VAT)', money(r.total), bold: true, size: 12),
+    RLine.row('Excl. VAT', money(r.subtotal), size: 8),
+    RLine.row('VAT ${_rate()}%', money(r.vat), size: 8),
+    const RLine.gap(),
+    for (final p in r.payments) ...[
+      RLine.row('Paid by ${_method(p['method'])}', money(n(p['amount'])), size: 8),
+      if (n(p['tip']) > 0) RLine.row('  Tip', money(n(p['tip'])), size: 8),
+      if (p['method'] == 'cash' && n(p['tendered']) > 0) ...[
+        RLine.row('  Tendered', money(n(p['tendered'])), size: 8),
+        RLine.row('  Change', money(n(p['change_given'])), size: 8),
+      ],
+      if (p['method'] != 'cash' && '${p['card_last4'] ?? ''}'.isNotEmpty)
+        RLine.row('  Card ending', '${p['card_last4']}', size: 8),
+    ],
+    if (!r.paid && !r.cancelled) RLine.row('STILL TO PAY', money(r.total - r.paidAmount), bold: true, size: 10),
+    if (r.refunded > 0) RLine.row('Refunded', money(r.refunded), bold: true, size: 8),
+    if (footer.isNotEmpty) ...[const RLine.gap(), RLine.center(footer, size: 8)],
+  ];
+  return lines;
+}
+
+/// Plain text version, used for email.
+String receiptText(ReceiptData r) {
+  final b = StringBuffer();
+  for (final l in receiptLines(r)) {
+    switch (l.kind) {
+      case 'divider':
+        b.writeln('------------------------------');
+      case 'gap':
+        b.writeln('');
+      case 'row':
+        b.writeln('${l.left}   ${l.right}');
+      case 'note':
+        b.writeln('   (${l.left})');
+      default:
+        b.writeln(l.left);
+    }
+  }
+  return b.toString();
 }
 
 /// Slip paper: 80 mm rolls print 72 mm wide, 58 mm rolls print about 48 mm wide.
@@ -79,57 +199,6 @@ PdfPageFormat slipFormat() {
       marginBottom: 6 * PdfPageFormat.mm);
 }
 
-String _method(dynamic m) => m == 'cash' ? 'Cash' : 'Credit card';
-
-String _lineTotal(Map<String, dynamic> i) => money(n(i['qty']) * n(i['unit_price']));
-
-final _when = DateFormat('yyyy-MM-dd HH:mm');
-
-/// Plain text version, used for email and as a fallback.
-String receiptText(ReceiptData r) {
-  final c = r.company;
-  final b = StringBuffer();
-  b.writeln(r.companyName);
-  for (final k in ['address', 'phone', 'email']) {
-    final v = '${c[k] ?? ''}'.trim();
-    if (v.isNotEmpty) b.writeln(k == 'phone' ? 'Tel $v' : v);
-  }
-  final vatNo = '${c['vat_number'] ?? ''}'.trim();
-  if (vatNo.isNotEmpty) b.writeln('VAT no. $vatNo');
-  b.writeln('');
-  b.writeln('Receipt #${r.ref}');
-  b.writeln(_when.format(r.when));
-  if (r.typeText.isNotEmpty) b.writeln(r.typeText);
-  if (r.cancelled) b.writeln('*** CANCELLED ***');
-  if (!r.paid) b.writeln('*** NOT PAID ***');
-  b.writeln('------------------------------');
-  for (final i in r.items) {
-    b.writeln('${i['qty']} x ${i['name']}   ${_lineTotal(i)}');
-    final note = '${i['notes'] ?? ''}'.trim();
-    if (note.isNotEmpty) b.writeln('   ($note)');
-  }
-  b.writeln('------------------------------');
-  b.writeln('Subtotal (excl. VAT): ${money(r.subtotal)}');
-  b.writeln('VAT ${vatRate().toStringAsFixed(vatRate() == vatRate().roundToDouble() ? 0 : 1)}%: ${money(r.vat)}');
-  b.writeln('TOTAL: ${money(r.total)}');
-  for (final p in r.payments) {
-    b.writeln('Paid by ${_method(p['method'])}: ${money(n(p['amount']))}');
-    if (p['method'] == 'cash' && n(p['tendered']) > 0) {
-      b.writeln('Tendered ${money(n(p['tendered']))}, change ${money(n(p['change_given']))}');
-    }
-    if (p['method'] != 'cash' && '${p['card_last4'] ?? ''}'.isNotEmpty) {
-      b.writeln('Card ending ${p['card_last4']}');
-    }
-  }
-  if (r.refunded > 0) b.writeln('Refunded: ${money(r.refunded)}');
-  final footer = '${c['receipt_footer'] ?? ''}'.trim();
-  if (footer.isNotEmpty) {
-    b.writeln('');
-    b.writeln(footer);
-  }
-  return b.toString();
-}
-
 /// Roll PDF sized to the printable width of a standard slip printer.
 Future<Uint8List> receiptPdf(ReceiptData r) async {
   final c = r.company;
@@ -142,79 +211,86 @@ Future<Uint8List> receiptPdf(ReceiptData r) async {
       logo = null; // print without the logo if it cannot be fetched
     }
   }
+  final small = slipPaperMm() == 58;
   pw.TextStyle t(double size, {bool bold = false, bool italic = false}) => pw.TextStyle(
-      fontSize: size,
+      fontSize: small ? size * 0.85 : size,
       fontWeight: bold ? pw.FontWeight.bold : pw.FontWeight.normal,
       fontStyle: italic ? pw.FontStyle.italic : pw.FontStyle.normal);
-  pw.Widget center(String s, pw.TextStyle st) =>
-      pw.SizedBox(width: double.infinity, child: pw.Text(s, style: st, textAlign: pw.TextAlign.center));
-  pw.Widget row(String l, String rr, {bool bold = false, double size = 9}) => pw.Row(
-          mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-          crossAxisAlignment: pw.CrossAxisAlignment.start,
-          children: [
-            pw.Expanded(child: pw.Text(l, style: t(size, bold: bold))),
+
+  pw.Widget draw(RLine l) {
+    switch (l.kind) {
+      case 'divider':
+        return pw.Padding(
+            padding: const pw.EdgeInsets.symmetric(vertical: 4), child: pw.Divider(thickness: 0.6, height: 1));
+      case 'gap':
+        return pw.SizedBox(height: 4);
+      case 'row':
+        return pw.Padding(
+          padding: const pw.EdgeInsets.only(bottom: 1),
+          child: pw.Row(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
+            pw.Expanded(child: pw.Text(l.left, style: t(l.size, bold: l.bold))),
             pw.SizedBox(width: 6),
-            pw.Text(rr, style: t(size, bold: bold)),
-          ]);
-  final divider = pw.Padding(
-      padding: const pw.EdgeInsets.symmetric(vertical: 5),
-      child: pw.Divider(thickness: 0.6, height: 1));
+            pw.Text(l.right ?? '', style: t(l.size, bold: l.bold)),
+          ]),
+        );
+      case 'note':
+        return pw.Padding(
+            padding: const pw.EdgeInsets.only(left: 8, bottom: 2), child: pw.Text(l.left, style: t(8, italic: true)));
+      default:
+        return pw.SizedBox(
+            width: double.infinity,
+            child: pw.Text(l.left, style: t(l.size, bold: l.bold), textAlign: pw.TextAlign.center));
+    }
+  }
 
   final doc = pw.Document(title: 'Receipt ${r.ref}', author: r.companyName);
   doc.addPage(pw.Page(
     pageFormat: slipFormat(),
-    build: (ctx) {
-      final vatNo = '${c['vat_number'] ?? ''}'.trim();
-      final footer = '${c['receipt_footer'] ?? ''}'.trim();
-      return pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.stretch, children: [
-        if (logo != null)
-          pw.Center(child: pw.Image(logo, width: 46, height: 46, fit: pw.BoxFit.contain)),
-        if (logo != null) pw.SizedBox(height: 4),
-        center(r.companyName, t(13, bold: true)),
-        for (final k in ['address', 'phone', 'email'])
-          if ('${c[k] ?? ''}'.trim().isNotEmpty)
-            center(k == 'phone' ? 'Tel ${c[k]}' : '${c[k]}', t(8)),
-        if (vatNo.isNotEmpty) center('VAT no. $vatNo', t(8)),
-        divider,
-        center('RECEIPT #${r.ref}', t(11, bold: true)),
-        center(_when.format(r.when), t(8)),
-        if (r.typeText.isNotEmpty) center(r.typeText, t(8)),
-        if (r.cancelled) center('CANCELLED', t(11, bold: true)),
-        if (!r.paid) center('NOT PAID', t(11, bold: true)),
-        divider,
-        for (final i in r.items) ...[
-          row('${i['qty']} x ${i['name']}', _lineTotal(i)),
-          if ('${i['notes'] ?? ''}'.trim().isNotEmpty)
-            pw.Padding(
-                padding: const pw.EdgeInsets.only(left: 8, bottom: 2),
-                child: pw.Text('${i['notes']}'.trim(), style: t(8, italic: true))),
-          pw.SizedBox(height: 2),
-        ],
-        divider,
-        row('Subtotal (excl. VAT)', money(r.subtotal), size: 8),
-        row('VAT ${vatRate().toStringAsFixed(vatRate() == vatRate().roundToDouble() ? 0 : 1)}%', money(r.vat), size: 8),
-        pw.SizedBox(height: 3),
-        row('TOTAL', money(r.total), bold: true, size: 12),
-        pw.SizedBox(height: 4),
-        for (final p in r.payments) ...[
-          row('Paid by ${_method(p['method'])}', money(n(p['amount'])), size: 8),
-          if (p['method'] == 'cash' && n(p['tendered']) > 0) ...[
-            row('Tendered', money(n(p['tendered'])), size: 8),
-            row('Change', money(n(p['change_given'])), size: 8),
-          ],
-          if (p['method'] != 'cash' && '${p['card_last4'] ?? ''}'.isNotEmpty)
-            row('Card ending', '${p['card_last4']}', size: 8),
-        ],
-        if (r.refunded > 0) row('Refunded', money(r.refunded), bold: true, size: 8),
-        if (footer.isNotEmpty) ...[pw.SizedBox(height: 8), center(footer, t(8))],
-        pw.SizedBox(height: 6),
-      ]);
-    },
+    build: (ctx) => pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.stretch, children: [
+      if (logo != null) pw.Center(child: pw.Image(logo, width: 46, height: 46, fit: pw.BoxFit.contain)),
+      if (logo != null) pw.SizedBox(height: 4),
+      for (final l in receiptLines(r)) draw(l),
+      pw.SizedBox(height: 6),
+    ]),
   ));
   return doc.save();
 }
 
+// ---- printing ----------------------------------------------------------------
+
+/// Print straight after a sale is fully paid (per device).
+bool autoPrintOn() => LocalStore.getMeta('auto_print') == true;
+Future<void> setAutoPrint(bool v) => LocalStore.setMeta('auto_print', v);
+
+/// On the Windows and Android apps a slip printer can be chosen once; receipts
+/// then print without a dialog. Browsers always show their print dialog.
+String? savedPrinterName() => LocalStore.getMeta('printer_name') as String?;
+
+Future<String?> chooseSlipPrinter(BuildContext context) async {
+  final p = await Printing.pickPrinter(context: context, title: 'Choose the slip printer');
+  if (p == null) return null;
+  await LocalStore.setMeta('printer_url', p.url);
+  await LocalStore.setMeta('printer_name', p.name);
+  return p.name;
+}
+
+Future<void> forgetSlipPrinter() async {
+  await LocalStore.removeMeta('printer_url');
+  await LocalStore.removeMeta('printer_name');
+}
+
 Future<void> printSlip(ReceiptData r) async {
+  final url = LocalStore.getMeta('printer_url') as String?;
+  if (!kIsWeb && url != null) {
+    final ok = await Printing.directPrintPdf(
+      printer: Printer(url: url, name: savedPrinterName()),
+      name: 'Receipt-${r.ref}',
+      format: slipFormat(),
+      usePrinterSettings: false,
+      onLayout: (_) => receiptPdf(r),
+    );
+    if (ok) return;
+  }
   await Printing.layoutPdf(
     name: 'Receipt-${r.ref}',
     format: slipFormat(),
@@ -222,6 +298,18 @@ Future<void> printSlip(ReceiptData r) async {
     usePrinterSettings: false,
     onLayout: (_) => receiptPdf(r),
   );
+}
+
+/// Called by the till after a sale is fully paid.
+Future<void> maybeAutoPrint(String orderId) async {
+  if (!autoPrintOn()) return;
+  final r = ReceiptData.forOrder(orderId);
+  if (r == null) return;
+  try {
+    await printSlip(r);
+  } catch (_) {
+    // A printer problem must never stop the till.
+  }
 }
 
 Future<void> downloadReceipt(ReceiptData r) async {
@@ -317,7 +405,7 @@ class _ReceiptDialogState extends State<_ReceiptDialog> {
   }
 
   Future<void> _refund(ReceiptData r) async {
-    final remaining = r.total - _refunded;
+    final remaining = round2(r.paidAmount - _refunded);
     if (remaining <= 0) {
       _say('This order has already been fully refunded.');
       return;
@@ -336,7 +424,7 @@ class _ReceiptDialogState extends State<_ReceiptDialog> {
           content: SizedBox(
             width: 380,
             child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('Order total ${money(r.total)}${_refunded > 0 ? ', already refunded ${money(_refunded)}' : ''}. Refundable: ${money(remaining)}'),
+              Text('Paid ${money(r.paidAmount)}${_refunded > 0 ? ', already refunded ${money(_refunded)}' : ''}. Refundable: ${money(remaining)}'),
               const SizedBox(height: 12),
               TextField(
                   controller: amount,
@@ -412,7 +500,7 @@ class _ReceiptDialogState extends State<_ReceiptDialog> {
           actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close'))]);
     }
     return AlertDialog(
-      title: Text('Receipt #${r.ref}'),
+      title: Text(r.invoiceNo ?? 'Receipt #${r.ref}'),
       content: SizedBox(
         width: 360,
         child: SingleChildScrollView(child: _ReceiptPaper(r: r)),
@@ -458,7 +546,7 @@ class _ReceiptDialogState extends State<_ReceiptDialog> {
               onPressed: () => _email(r),
               icon: const Icon(Icons.email_outlined, size: 18),
               label: const Text('Email')),
-          if (_canRefund && r.paid)
+          if (_canRefund && r.paidAmount > 0)
             TextButton.icon(
                 style: TextButton.styleFrom(foregroundColor: Brand.red),
                 onPressed: () => _refund(r),
@@ -478,22 +566,35 @@ class _ReceiptPaper extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final c = r.company;
     const mono = TextStyle(fontFamily: 'monospace', fontSize: 13, height: 1.35);
-    Widget line(String l, String rr, {bool bold = false}) => Padding(
-          padding: const EdgeInsets.symmetric(vertical: 1),
-          child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Expanded(child: Text(l, style: mono.copyWith(fontWeight: bold ? FontWeight.w800 : null))),
-            Text(rr, style: mono.copyWith(fontWeight: bold ? FontWeight.w800 : null)),
-          ]),
-        );
-    Widget center(String s, {bool bold = false, double size = 13}) => SizedBox(
-        width: double.infinity,
-        child: Text(s,
-            textAlign: TextAlign.center,
-            style: mono.copyWith(fontWeight: bold ? FontWeight.w800 : null, fontSize: size)));
-    const dash = Padding(padding: EdgeInsets.symmetric(vertical: 6), child: Divider(height: 1, thickness: 1));
-    final logo = '${c['logo_url'] ?? ''}';
+    TextStyle st(RLine l) => mono.copyWith(
+        fontWeight: l.bold ? FontWeight.w800 : null, fontSize: l.size <= 0 ? 13 : (l.size + 4).clamp(10, 18).toDouble());
+    Widget draw(RLine l) {
+      switch (l.kind) {
+        case 'divider':
+          return const Padding(padding: EdgeInsets.symmetric(vertical: 6), child: Divider(height: 1, thickness: 1));
+        case 'gap':
+          return const SizedBox(height: 6);
+        case 'row':
+          return Padding(
+            padding: const EdgeInsets.symmetric(vertical: 1),
+            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Expanded(child: Text(l.left, style: st(l))),
+              Text(l.right ?? '', style: st(l)),
+            ]),
+          );
+        case 'note':
+          return Align(
+              alignment: Alignment.centerLeft,
+              child: Padding(
+                  padding: const EdgeInsets.only(left: 16),
+                  child: Text(l.left, style: mono.copyWith(fontSize: 11, fontStyle: FontStyle.italic))));
+        default:
+          return SizedBox(width: double.infinity, child: Text(l.left, textAlign: TextAlign.center, style: st(l)));
+      }
+    }
+
+    final logo = '${r.company['logo_url'] ?? ''}';
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -505,45 +606,7 @@ class _ReceiptPaper extends StatelessWidget {
           Padding(
               padding: const EdgeInsets.only(bottom: 6),
               child: Image.network(logo, width: 52, height: 52, errorBuilder: (_, __, ___) => const SizedBox())),
-        center(r.companyName, bold: true, size: 16),
-        for (final k in ['address', 'phone', 'email'])
-          if ('${c[k] ?? ''}'.trim().isNotEmpty) center(k == 'phone' ? 'Tel ${c[k]}' : '${c[k]}', size: 11),
-        if ('${c['vat_number'] ?? ''}'.trim().isNotEmpty) center('VAT no. ${c['vat_number']}', size: 11),
-        dash,
-        center('RECEIPT #${r.ref}', bold: true),
-        center(_when.format(r.when), size: 11),
-        if (r.typeText.isNotEmpty) center(r.typeText, size: 11),
-        if (r.cancelled) center('CANCELLED', bold: true, size: 15),
-        if (!r.paid) center('NOT PAID', bold: true, size: 15),
-        dash,
-        for (final i in r.items) ...[
-          line('${i['qty']} x ${i['name']}', _lineTotal(i)),
-          if ('${i['notes'] ?? ''}'.trim().isNotEmpty)
-            Align(
-                alignment: Alignment.centerLeft,
-                child: Padding(
-                    padding: const EdgeInsets.only(left: 16),
-                    child: Text('${i['notes']}'.trim(), style: mono.copyWith(fontSize: 11, fontStyle: FontStyle.italic)))),
-        ],
-        dash,
-        line('Subtotal (excl. VAT)', money(r.subtotal)),
-        line('VAT ${vatRate().toStringAsFixed(vatRate() == vatRate().roundToDouble() ? 0 : 1)}%', money(r.vat)),
-        line('TOTAL', money(r.total), bold: true),
-        const SizedBox(height: 6),
-        for (final p in r.payments) ...[
-          line('Paid by ${_method(p['method'])}', money(n(p['amount']))),
-          if (p['method'] == 'cash' && n(p['tendered']) > 0) ...[
-            line('Tendered', money(n(p['tendered']))),
-            line('Change', money(n(p['change_given']))),
-          ],
-          if (p['method'] != 'cash' && '${p['card_last4'] ?? ''}'.isNotEmpty)
-            line('Card ending', '${p['card_last4']}'),
-        ],
-        if (r.refunded > 0) line('Refunded', money(r.refunded), bold: true),
-        if ('${c['receipt_footer'] ?? ''}'.trim().isNotEmpty) ...[
-          const SizedBox(height: 10),
-          center('${c['receipt_footer']}', size: 11),
-        ],
+        for (final l in receiptLines(r)) draw(l),
       ]),
     );
   }

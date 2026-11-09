@@ -1,6 +1,7 @@
 import 'dart:math';
 
 import 'package:intl/intl.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'local_store.dart';
 
@@ -36,35 +37,68 @@ double vatRate() {
 /// Menu and "how many can we still make" from the recipes and stock on hand.
 class Catalog {
   static List<Map<String, dynamic>> categories() {
-    final list = LocalStore.rows('categories')
-        .where((c) => c['active'] != false)
-        .toList();
+    final list = LocalStore.rows('categories').where((c) => c['active'] != false).toList();
     list.sort((a, b) => n(a['sort_order']).compareTo(n(b['sort_order'])));
     return list;
   }
 
   static List<Map<String, dynamic>> products(String? categoryId) {
     final list = LocalStore.rows('products')
-        .where((p) =>
-            p['active'] != false &&
-            (categoryId == null || p['category_id'] == categoryId))
+        .where((p) => p['active'] != false && (categoryId == null || p['category_id'] == categoryId))
         .toList();
     list.sort((a, b) => n(a['sort_order']).compareTo(n(b['sort_order'])));
     return list;
   }
 
+  /// stockItemId -> quantity one portion takes, including recipe waste and extras.
+  static Map<String, double> usage(String productId, List<String> modifierIds, num qty) {
+    final out = <String, double>{};
+    for (final l in LocalStore.rows('recipe_lines')) {
+      if (l['product_id'] != productId) continue;
+      final q = n(l['qty']) * (1 + n(l['waste_pct']) / 100) * qty;
+      out.update(l['stock_item_id'] as String, (v) => v + q, ifAbsent: () => q.toDouble());
+    }
+    if (modifierIds.isNotEmpty) {
+      for (final m in LocalStore.rows('modifiers')) {
+        if (!modifierIds.contains(m['id']) || m['stock_item_id'] == null) continue;
+        final q = n(m['stock_qty']) * qty;
+        out.update(m['stock_item_id'] as String, (v) => v + q, ifAbsent: () => q.toDouble());
+      }
+    }
+    return out;
+  }
+
+  /// Stock still to be taken off by sales made on this device that have not
+  /// reached the server yet (the server takes it off when they arrive).
+  static Map<String, double> pendingUsage() {
+    final out = <String, double>{};
+    for (final e in LocalStore.pending()) {
+      final item = e.value;
+      if (item['table'] != 'order_items' || item['op'] != 'insert') continue;
+      final row = Map<String, dynamic>.from(item['row'] as Map);
+      if (row['voided'] == true || row['product_id'] == null) continue;
+      final mods = ((row['modifier_ids'] as List?) ?? const []).map((x) => '$x').toList();
+      usage(row['product_id'] as String, mods, n(row['qty'])).forEach((k, v) {
+        out.update(k, (o) => o + v, ifAbsent: () => v);
+      });
+    }
+    return out;
+  }
+
   /// productId -> portions that stock still allows (9999 = no recipe).
   static Map<String, int> canMakeAll() {
+    final pending = pendingUsage();
     final stock = {
-      for (final s in LocalStore.rows('stock_items')) s['id']: n(s['qty_on_hand'])
+      for (final s in LocalStore.rows('stock_items'))
+        s['id']: n(s['qty_on_hand']).toDouble() - (pending[s['id']] ?? 0)
     };
     final result = <String, int>{};
     for (final line in LocalStore.rows('recipe_lines')) {
       final pid = line['product_id'] as String;
-      final qty = n(line['qty']);
+      final qty = n(line['qty']) * (1 + n(line['waste_pct']) / 100);
       if (qty <= 0) continue;
       final have = stock[line['stock_item_id']] ?? 0;
-      final portions = (have / qty).floor();
+      final portions = have <= 0 ? 0 : (have / qty).floor();
       final current = result[pid] ?? 9999;
       result[pid] = portions < current ? portions : current;
     }
@@ -83,12 +117,16 @@ class CartLine {
     this.qty = 1,
     this.notes = '',
     this.extra = 0,
-  });
+    List<String>? modifierIds,
+  }) : modifierIds = modifierIds ?? [];
   final String productId;
   final String name;
   final double price;
   int qty;
   String notes;
+
+  /// Special requests picked from the list (they can carry a price and use stock).
+  List<String> modifierIds;
 
   /// Extra charge per item from special requests such as "Extra cheese".
   double extra;
@@ -96,10 +134,25 @@ class CartLine {
   double get total => round2(unitPrice * qty);
 }
 
-/// Creating and moving orders. Everything is written to the device first and
+/// Money maths kept in one place so the till, receipts and tests agree.
+class Totals {
+  Totals(this.itemsTotal, this.discount, this.vatRate);
+  final double itemsTotal;
+  final double discount;
+  final double vatRate;
+
+  double get total => round2(max(0, itemsTotal - discount));
+
+  /// Prices include VAT, so the VAT is the part of the total above the net price.
+  double get vat => round2(total * vatRate / (100 + vatRate));
+  double get subtotal => round2(total - vat);
+}
+
+/// Creating and changing orders. Everything is written to the device first and
 /// uploaded later, so it works without internet.
 class OrderRepo {
   static String _nowIso() => DateTime.now().toUtc().toIso8601String();
+  static String? get _me => Supabase.instance.client.auth.currentUser?.id;
 
   static Future<String> _deviceCode() async {
     var code = LocalStore.getMeta('device_code') as String?;
@@ -119,87 +172,157 @@ class OrderRepo {
     return '$code${next.toString().padLeft(4, '0')}';
   }
 
-  /// Returns the order reference (for example "KQM0007").
+  static Map<String, dynamic> _itemRow(String orderId, CartLine l, String now, {bool added = false}) => {
+        'id': LocalStore.newId(),
+        'order_id': orderId,
+        'product_id': l.productId,
+        'name': l.name,
+        'qty': l.qty,
+        'unit_price': l.unitPrice,
+        'notes': l.notes.trim().isEmpty ? null : l.notes.trim(),
+        'modifier_ids': l.modifierIds,
+        'done': false,
+        'voided': false,
+        'added_later': added,
+        'created_at': now,
+      };
+
+  /// Returns the order id. [payments] may be empty (pay later) or several (split bill).
   static Future<String> create({
     required List<CartLine> lines,
     required String type,
     String? table,
-    Map<String, dynamic>? payment,
+    double discount = 0,
+    String? discountReason,
+    List<Map<String, dynamic>> payments = const [],
   }) async {
     final id = LocalStore.newId();
     final ref = await _nextRef();
     final now = _nowIso();
-    final total = round2(lines.fold<double>(0, (s, l) => s + l.total));
-    final vat = round2(total * vatRate() / (100 + vatRate()));
+    final t = Totals(lines.fold<double>(0, (s, l) => s + l.total), discount, vatRate());
+    final paidSoFar = payments.fold<double>(0, (s, p) => s + n(p['amount']).toDouble());
 
-    await LocalStore.upsert('orders', {
+    await LocalStore.insert('orders', {
       'id': id,
       'order_ref': ref,
       'device_name': await _deviceCode(),
       'status': 'new',
       'order_type': type,
       'table_no': (table == null || table.trim().isEmpty) ? null : table.trim(),
-      'subtotal': round2(total - vat),
-      'vat': vat,
-      'total': total,
-      'paid': payment != null,
+      'subtotal': t.subtotal,
+      'vat': t.vat,
+      'total': t.total,
+      'discount': round2(min(discount, t.itemsTotal)),
+      'discount_reason': discount > 0 ? discountReason : null,
+      'paid': paidSoFar + 0.005 >= t.total,
+      'created_by': _me,
       'created_at': now,
       'sent_at': now,
     });
     for (final l in lines) {
-      await LocalStore.upsert('order_items', {
-        'id': LocalStore.newId(),
-        'order_id': id,
-        'product_id': l.productId,
-        'name': l.name,
-        'qty': l.qty,
-        'unit_price': l.unitPrice,
-        'notes': l.notes.trim().isEmpty ? null : l.notes.trim(),
-        'done': false,
-        'created_at': now,
-      });
+      await LocalStore.insert('order_items', _itemRow(id, l, now));
     }
-    if (payment != null) await _savePayment(id, payment);
-    return ref;
+    for (final p in payments) {
+      await _savePayment(id, p);
+    }
+    return id;
   }
 
   static Future<void> _savePayment(String orderId, Map<String, dynamic> p) =>
-      LocalStore.upsert('payments', {
+      LocalStore.insert('payments', {
         'id': LocalStore.newId(),
         'order_id': orderId,
-        ...p,
+        'method': p['method'],
+        'amount': p['amount'],
+        'tip': p['tip'] ?? 0,
+        if (p['tendered'] != null) 'tendered': p['tendered'],
+        if (p['change_given'] != null) 'change_given': p['change_given'],
+        if (p['card_brand'] != null) 'card_brand': p['card_brand'],
+        if (p['card_last4'] != null) 'card_last4': p['card_last4'],
+        if (p['slip_no'] != null) 'slip_no': p['slip_no'],
+        'created_by': _me,
         'created_at': _nowIso(),
       });
 
-  /// Takes payment for an order that was sent to the kitchen unpaid.
-  static Future<void> pay(String orderId, Map<String, dynamic> payment) async {
-    await _savePayment(orderId, payment);
-    await LocalStore.upsert('orders', {'id': orderId, 'paid': true});
+  static List<Map<String, dynamic>> paymentsFor(String orderId) =>
+      LocalStore.rows('payments').where((p) => p['order_id'] == orderId).toList();
+
+  static double paidAmount(String orderId) =>
+      round2(paymentsFor(orderId).fold<double>(0, (s, p) => s + n(p['amount']).toDouble()));
+
+  static double balance(String orderId) {
+    final o = LocalStore.row('orders', orderId);
+    if (o == null) return 0;
+    return round2(max(0, n(o['total']).toDouble() - paidAmount(orderId)));
   }
 
-  static Future<void> setStatus(String orderId, String status,
-      {String? voidReason}) async {
+  /// Takes (part of) the payment for an order. Marks it paid once fully paid.
+  static Future<void> pay(String orderId, Map<String, dynamic> payment) async {
+    await _savePayment(orderId, payment);
+    if (balance(orderId) <= 0.005) {
+      await LocalStore.patch('orders', orderId, {'paid': true});
+    }
+  }
+
+  /// Adds items to an unpaid order (the kitchen sees them marked as added).
+  static Future<void> addItems(String orderId, List<CartLine> lines) async {
     final now = _nowIso();
-    final patch = <String, dynamic>{'id': orderId, 'status': status};
+    for (final l in lines) {
+      await LocalStore.insert('order_items', _itemRow(orderId, l, now, added: true));
+    }
+    await recalc(orderId);
+    final o = LocalStore.row('orders', orderId);
+    if (o != null && (o['status'] == 'ready' || o['status'] == 'collected')) {
+      await LocalStore.patch('orders', orderId, {'status': 'in_progress'});
+    }
+  }
+
+  /// Takes an item off an unpaid order. The server returns its stock.
+  static Future<void> removeItem(String itemId) async {
+    final item = LocalStore.row('order_items', itemId);
+    if (item == null) return;
+    await LocalStore.patch('order_items', itemId, {'voided': true, 'voided_at': _nowIso()});
+    await recalc(item['order_id'] as String);
+  }
+
+  /// Works out the order total again from its items and discount.
+  static Future<void> recalc(String orderId) async {
+    final o = LocalStore.row('orders', orderId);
+    if (o == null) return;
+    final items = itemsFor(orderId).where((i) => i['voided'] != true);
+    final itemsTotal = items.fold<double>(0, (s, i) => s + n(i['qty']) * n(i['unit_price']).toDouble());
+    final t = Totals(itemsTotal, n(o['discount']).toDouble(), vatRate());
+    await LocalStore.patch('orders', orderId, {
+      'subtotal': t.subtotal,
+      'vat': t.vat,
+      'total': t.total,
+      if (n(o['discount']) > itemsTotal) 'discount': round2(itemsTotal),
+    });
+  }
+
+  static Future<void> setStatus(String orderId, String status, {String? voidReason}) async {
+    final now = _nowIso();
+    final patch = <String, dynamic>{'status': status};
     if (status == 'in_progress') patch['started_at'] = now;
     if (status == 'ready') patch['ready_at'] = now;
     if (status == 'collected') patch['collected_at'] = now;
+    if (status == 'void') {
+      patch['voided_at'] = now;
+      patch['voided_by'] = _me;
+    }
     if (voidReason != null) patch['void_reason'] = voidReason;
-    if (status == 'void') patch['voided_at'] = now;
-    await LocalStore.upsert('orders', patch);
+    await LocalStore.patch('orders', orderId, patch);
   }
 
   static Future<void> setItemDone(String itemId, bool done) =>
-      LocalStore.upsert('order_items', {
-        'id': itemId,
-        'done': done,
-        'done_at': done ? _nowIso() : null,
-      });
+      LocalStore.patch('order_items', itemId, {'done': done, 'done_at': done ? _nowIso() : null});
 
   static List<Map<String, dynamic>> itemsFor(String orderId) {
-    final list =
-        LocalStore.rows('order_items').where((i) => i['order_id'] == orderId).toList();
+    final list = LocalStore.rows('order_items').where((i) => i['order_id'] == orderId).toList();
     list.sort((a, b) => '${a['created_at']}'.compareTo('${b['created_at']}'));
     return list;
   }
+
+  static List<Map<String, dynamic>> liveItemsFor(String orderId) =>
+      itemsFor(orderId).where((i) => i['voided'] != true).toList();
 }

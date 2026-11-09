@@ -22,4 +22,7 @@ class AppConfig {
     'SUPABASE_KEY',
     defaultValue: 'sb_publishable_OAld3pVVrbDnWVWMJRXJtg_5y8oAUO6',
   );
+
+  /// Shown under Settings. Raise it with every release.
+  static const appVersion = '1.2.0';
 }
