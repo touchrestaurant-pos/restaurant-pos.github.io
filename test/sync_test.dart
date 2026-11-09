@@ -151,4 +151,13 @@ void main() {
     expect(Totals(50, 80, 15).total, 0, reason: 'a discount can never make the total negative');
     expect(round2(0.1 + 0.2), 0.3);
   });
+
+  test('zero-rated items carry no VAT, and a discount is shared fairly', () {
+    // R100 burger (standard) + R20 brown bread (zero-rated), R12 discount (10%).
+    final t = Totals(120, 12, 15, standardTotal: 100);
+    expect(t.total, 108);
+    // Standard share after discount is R90, VAT = 90 x 15/115.
+    expect(t.vat, 11.74);
+    expect(Totals(50, 0, 15, standardTotal: 0).vat, 0, reason: 'all zero-rated');
+  });
 }

@@ -112,6 +112,24 @@ String _lineTotal(Map<String, dynamic> i) => money(n(i['qty']) * n(i['unit_price
 final _when = DateFormat('yyyy-MM-dd HH:mm');
 String _rate() => vatRate().toStringAsFixed(vatRate() == vatRate().roundToDouble() ? 0 : 1);
 
+/// Zero-rated and exempt items, shown separately as a tax invoice requires.
+List<RLine> _vatSplit(ReceiptData r) {
+  final byType = <String, double>{};
+  final itemsTotal = r.items.fold<double>(0, (s, i) => s + n(i['qty']) * n(i['unit_price']).toDouble());
+  if (itemsTotal <= 0) return const [];
+  final factor = r.total / itemsTotal;
+  for (final i in r.items) {
+    final t = '${i['vat_type'] ?? 'standard'}';
+    byType[t] = (byType[t] ?? 0) + n(i['qty']) * n(i['unit_price']).toDouble() * factor;
+  }
+  if (byType.keys.every((k) => k == 'standard')) return const [];
+  return [
+    if ((byType['standard'] ?? 0) > 0) RLine.row('  Standard rated', money(round2(byType['standard']!)), size: 7),
+    if ((byType['zero'] ?? 0) > 0) RLine.row('  Zero-rated (Z)', money(round2(byType['zero']!)), size: 7),
+    if ((byType['exempt'] ?? 0) > 0) RLine.row('  Exempt (E)', money(round2(byType['exempt']!)), size: 7),
+  ];
+}
+
 List<RLine> receiptLines(ReceiptData r) {
   final c = r.company;
   final taxInvoice = r.vatNumber.isNotEmpty;
@@ -135,7 +153,8 @@ List<RLine> receiptLines(ReceiptData r) {
       RLine.center(r.paidAmount > 0 ? 'PART PAID' : 'NOT PAID - BILL', size: 11, bold: true),
     const RLine.divider(),
     for (final i in r.items) ...[
-      RLine.row('${i['qty']} x ${i['name']}', _lineTotal(i)),
+      RLine.row('${i['qty']} x ${i['name']}${i['vat_type'] == 'zero' ? ' (Z)' : (i['vat_type'] == 'exempt' ? ' (E)' : '')}',
+          _lineTotal(i)),
       if ('${i['notes'] ?? ''}'.trim().isNotEmpty) RLine.note('${i['notes']}'.trim()),
     ],
     const RLine.divider(),
@@ -149,6 +168,7 @@ List<RLine> receiptLines(ReceiptData r) {
     RLine.row('TOTAL (incl. VAT)', money(r.total), bold: true, size: 12),
     RLine.row('Excl. VAT', money(r.subtotal), size: 8),
     RLine.row('VAT ${_rate()}%', money(r.vat), size: 8),
+    ..._vatSplit(r),
     const RLine.gap(),
     for (final p in r.payments) ...[
       RLine.row('Paid by ${_method(p['method'])}', money(n(p['amount'])), size: 8),

@@ -36,7 +36,8 @@ class _CashierScreenState extends State<CashierScreen> {
   String? _editingOrderId;
 
   double get _itemsTotal => round2(_cart.fold<double>(0, (s, l) => s + l.total));
-  Totals get _totals => Totals(_itemsTotal, _discount, vatRate());
+  Totals get _totals => Totals(_itemsTotal, _discount, vatRate(),
+      standardTotal: _cart.where((l) => l.vatType == 'standard').fold<double>(0, (s, l) => s + l.total));
   int get _count => _cart.fold<int>(0, (s, l) => s + l.qty);
   Map<String, dynamic>? get _editingOrder =>
       _editingOrderId == null ? null : LocalStore.row('orders', _editingOrderId);
@@ -68,7 +69,11 @@ class _CashierScreenState extends State<CashierScreen> {
       if (i >= 0) {
         _cart[i].qty++;
       } else {
-        _cart.add(CartLine(productId: p['id'] as String, name: p['name'] as String, price: n(p['price']).toDouble()));
+        _cart.add(CartLine(
+            productId: p['id'] as String,
+            name: p['name'] as String,
+            price: n(p['price']).toDouble(),
+            vatType: '${p['vat_type'] ?? 'standard'}'));
       }
     });
   }

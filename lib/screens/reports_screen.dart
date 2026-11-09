@@ -26,6 +26,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
   Map<String, dynamic>? _data;
   Map<String, dynamic>? _prev;
   Map<String, dynamic>? _refunds;
+  List<Map<String, dynamic>> _vat = [];
   String _metric = 'revenue';
   int _topN = 10;
   String _category = 'All';
@@ -102,6 +103,16 @@ class _ReportsScreenState extends State<ReportsScreen> {
       _data = Map<String, dynamic>.from(res as Map);
       _loaded = range;
       _cachedAt = null;
+      try {
+        final v = await Supabase.instance.client.rpc('vat_report', params: {
+          'p_from': range.start.toUtc().toIso8601String(),
+          'p_to': range.end.toUtc().toIso8601String(),
+        });
+        _vat = (v as List).map((e) => Map<String, dynamic>.from(e as Map)).toList();
+        _data!['vat_breakdown'] = _vat;
+      } catch (_) {
+        _vat = [];
+      }
       try {
         final rf = await Supabase.instance.client.rpc('admin_refunds', params: {
           'p_from': range.start.toUtc().toIso8601String(),
@@ -506,6 +517,13 @@ class _ReportsScreenState extends State<ReportsScreen> {
                 ['#${d['ref']}', d['invoice'] == null ? '' : '${d['invoice']}', money(n(d['discount'])), '${d['reason'] ?? ''}', '${d['by']}']
             ], right: {2}),
             note: 'Every discount and who gave it.'),
+      _section(
+          'VAT by type (for your VAT return)',
+          _table(['VAT type', 'Sales incl. VAT', 'Excl. VAT', 'VAT'], [
+            for (final v in _list('vat_breakdown'))
+              [vatTypeNames[v['vat_type']] ?? '${v['vat_type']}', money(n(v['sales'])), money(n(v['excl'])), money(n(v['vat']))]
+          ], right: {1, 2, 3}),
+          note: 'Discounts are shared across each order\'s items. Zero-rated and exempt sales carry no VAT.'),
       _section(
           'Payments received',
           _table(['Method', 'Payments', 'Amount'], [

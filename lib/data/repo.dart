@@ -29,6 +29,8 @@ Map<String, dynamic>? companyRow() {
   return saved is Map ? Map<String, dynamic>.from(saved) : null;
 }
 
+const vatTypeNames = {'standard': 'Standard rated', 'zero': 'Zero-rated', 'exempt': 'Exempt'};
+
 double vatRate() {
   final r = companyRow()?['vat_rate'];
   return r == null ? 15 : n(r).toDouble();
@@ -117,8 +119,12 @@ class CartLine {
     this.qty = 1,
     this.notes = '',
     this.extra = 0,
+    this.vatType = 'standard',
     List<String>? modifierIds,
   }) : modifierIds = modifierIds ?? [];
+
+  /// standard (15%), zero (zero-rated, 0%) or exempt (no VAT).
+  final String vatType;
   final String productId;
   final String name;
   final double price;
@@ -136,15 +142,23 @@ class CartLine {
 
 /// Money maths kept in one place so the till, receipts and tests agree.
 class Totals {
-  Totals(this.itemsTotal, this.discount, this.vatRate);
+  Totals(this.itemsTotal, this.discount, this.vatRate, {this.standardTotal});
   final double itemsTotal;
   final double discount;
   final double vatRate;
 
+  /// Value of the items charged at the standard rate. Zero-rated and exempt
+  /// items carry no VAT. Leave empty when every item is standard.
+  final double? standardTotal;
+
   double get total => round2(max(0, itemsTotal - discount));
 
-  /// Prices include VAT, so the VAT is the part of the total above the net price.
-  double get vat => round2(total * vatRate / (100 + vatRate));
+  /// Share of the order that is standard-rated (a discount is shared evenly).
+  double get standardShare =>
+      itemsTotal <= 0 ? 1 : ((standardTotal ?? itemsTotal) / itemsTotal).clamp(0, 1).toDouble();
+
+  /// Prices include VAT, so the VAT is the part of the standard-rated total above its net price.
+  double get vat => round2(total * standardShare * vatRate / (100 + vatRate));
   double get subtotal => round2(total - vat);
 }
 
@@ -181,6 +195,7 @@ class OrderRepo {
         'unit_price': l.unitPrice,
         'notes': l.notes.trim().isEmpty ? null : l.notes.trim(),
         'modifier_ids': l.modifierIds,
+        'vat_type': l.vatType,
         'done': false,
         'voided': false,
         'added_later': added,
@@ -199,7 +214,8 @@ class OrderRepo {
     final id = LocalStore.newId();
     final ref = await _nextRef();
     final now = _nowIso();
-    final t = Totals(lines.fold<double>(0, (s, l) => s + l.total), discount, vatRate());
+    final t = Totals(lines.fold<double>(0, (s, l) => s + l.total), discount, vatRate(),
+        standardTotal: lines.where((l) => l.vatType == 'standard').fold<double>(0, (s, l) => s + l.total));
     final paidSoFar = payments.fold<double>(0, (s, p) => s + n(p['amount']).toDouble());
 
     await LocalStore.insert('orders', {
@@ -291,7 +307,10 @@ class OrderRepo {
     if (o == null) return;
     final items = itemsFor(orderId).where((i) => i['voided'] != true);
     final itemsTotal = items.fold<double>(0, (s, i) => s + n(i['qty']) * n(i['unit_price']).toDouble());
-    final t = Totals(itemsTotal, n(o['discount']).toDouble(), vatRate());
+    final standard = items
+        .where((i) => (i['vat_type'] ?? 'standard') == 'standard')
+        .fold<double>(0, (s, i) => s + n(i['qty']) * n(i['unit_price']).toDouble());
+    final t = Totals(itemsTotal, n(o['discount']).toDouble(), vatRate(), standardTotal: standard);
     await LocalStore.patch('orders', orderId, {
       'subtotal': t.subtotal,
       'vat': t.vat,

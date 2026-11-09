@@ -76,6 +76,10 @@ List<ReportTable> reportTables(int tab, Map<String, dynamic> d, Map<String, dyna
           ['Unpaid orders', '${q(u['orders'])} (${m(u['total'])})'],
           ['Cancelled orders', '${q(v['orders'])} (${m(v['total'])})'],
         ]),
+        ReportTable('VAT by type', ['VAT type', 'Sales incl. VAT', 'Excl. VAT', 'VAT'], [
+          for (final v in _l(d, 'vat_breakdown'))
+            [vatTypeNames[v['vat_type']] ?? '${v['vat_type']}', m(v['sales']), m(v['excl']), m(v['vat'])]
+        ]),
         ReportTable('Payments received', ['Method', 'Payments', 'Amount'],
             [for (final p in _l(d, 'payments')) [method(p['method']), q(p['count']), m(p['amount'])]]),
         ReportTable('Sales by day', ['Date', 'Orders', 'Sales'],

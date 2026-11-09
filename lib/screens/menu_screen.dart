@@ -138,6 +138,7 @@ class _MenuScreenState extends State<MenuScreen> {
                   DataColumn(label: Text('Item')),
                   DataColumn(label: Text('Category')),
                   DataColumn(label: Text('Price'), numeric: true),
+                  DataColumn(label: Text('VAT')),
                   DataColumn(label: Text('Ingredient cost'), numeric: true),
                   DataColumn(label: Text('Margin'), numeric: true),
                   DataColumn(label: Text('Can make'), numeric: true),
@@ -148,7 +149,7 @@ class _MenuScreenState extends State<MenuScreen> {
                     () {
                       final id = p['id'] as String;
                       final price = n(p['price']).toDouble();
-                      final net = price * 100 / (100 + rate);
+                      final net = (p['vat_type'] ?? 'standard') == 'standard' ? price * 100 / (100 + rate) : price;
                       final cost = _portionCost(id);
                       final hasRecipe = LocalStore.rows('recipe_lines').any((l) => l['product_id'] == id);
                       final margin = net <= 0 ? 0.0 : (net - cost) / net * 100;
@@ -160,6 +161,9 @@ class _MenuScreenState extends State<MenuScreen> {
                                 color: p['active'] == false ? Brand.muted : null))),
                         DataCell(Text(catName[p['category_id']] ?? '')),
                         DataCell(Text(money(price))),
+                        DataCell(Text(
+                            const {'standard': '15%', 'zero': 'Zero-rated', 'exempt': 'Exempt'}[p['vat_type'] ?? 'standard'] ?? '15%',
+                            style: TextStyle(color: (p['vat_type'] ?? 'standard') == 'standard' ? Brand.muted : Brand.amber))),
                         DataCell(Text(hasRecipe ? money(cost) : 'No recipe',
                             style: TextStyle(color: hasRecipe ? null : Brand.amber))),
                         DataCell(Text(hasRecipe ? '${margin.toStringAsFixed(1)}%' : '-',
@@ -244,6 +248,7 @@ class _MenuScreenState extends State<MenuScreen> {
     final price = TextEditingController(text: p == null ? '' : '${n(p['price'])}');
     String? cat = p?['category_id'] as String? ?? (_cat != 'all' ? _cat : cats.first['id'] as String);
     bool active = p?['active'] != false;
+    String vatType = '${p?['vat_type'] ?? 'standard'}';
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => StatefulBuilder(builder: (ctx, set) {
@@ -272,6 +277,25 @@ class _MenuScreenState extends State<MenuScreen> {
                     keyboardType: const TextInputType.numberWithOptions(decimal: true),
                     onChanged: (_) => set(() {}),
                     decoration: const InputDecoration(labelText: 'Price including VAT', prefixText: 'R')),
+                const SizedBox(height: 8),
+                DropdownButtonFormField<String>(
+                  initialValue: vatType,
+                  decoration: const InputDecoration(labelText: 'VAT'),
+                  items: const [
+                    DropdownMenuItem(value: 'standard', child: Text('Standard rated (15%)')),
+                    DropdownMenuItem(value: 'zero', child: Text('Zero-rated (0%)')),
+                    DropdownMenuItem(value: 'exempt', child: Text('Exempt (no VAT)')),
+                  ],
+                  onChanged: (v) => set(() => vatType = v ?? 'standard'),
+                ),
+                if (vatType != 'standard')
+                  const Padding(
+                    padding: EdgeInsets.only(top: 6),
+                    child: Text(
+                        'Only basic foods sold as they are (brown bread, maize meal, rice, fresh fruit and vegetables, milk, eggs ...) are zero-rated. '
+                        'Anything served as a meal or prepared to eat now is standard rated, even if made from these.',
+                        style: TextStyle(color: Brand.amber, fontSize: 12)),
+                  ),
                 SwitchListTile(
                     contentPadding: EdgeInsets.zero,
                     title: const Text('Available on the till'),
@@ -295,6 +319,7 @@ class _MenuScreenState extends State<MenuScreen> {
       'category_id': cat,
       'price': double.parse(price.text.replaceAll(',', '.')),
       'active': active,
+      'vat_type': vatType,
     };
     await _online(context, () async {
       if (p == null) {
@@ -417,7 +442,7 @@ class _RecipeDialogState extends State<_RecipeDialog> {
   Widget build(BuildContext context) {
     final price = n(widget.product['price']).toDouble();
     final rate = vatRate();
-    final net = price * 100 / (100 + rate);
+    final net = (widget.product['vat_type'] ?? 'standard') == 'standard' ? price * 100 / (100 + rate) : price;
     final cost = _cost;
     final margin = net <= 0 ? 0.0 : (net - cost) / net * 100;
     return AlertDialog(
