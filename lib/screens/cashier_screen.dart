@@ -51,12 +51,13 @@ class _CashierScreenState extends State<CashierScreen> {
       });
 
   Future<void> _editNotes(CartLine line, VoidCallback refresh) async {
-    final result = await showDialog<String>(
+    final result = await showDialog<Map<String, dynamic>>(
       context: context,
       builder: (_) => _NotesDialog(initial: line.notes, item: line.name),
     );
     if (result != null) {
-      line.notes = result;
+      line.notes = result['notes'] as String;
+      line.extra = (result['extra'] as num).toDouble();
       refresh();
     }
   }
@@ -619,7 +620,9 @@ class _NotesDialogState extends State<_NotesDialog> {
                 children: [
                   for (final m in mods)
                     FilterChip(
-                      label: Text(m['name'] as String),
+                      label: Text(n(m['price_delta']) > 0
+                          ? '${m['name']} (+${money(n(m['price_delta']))})'
+                          : m['name'] as String),
                       selected: _picked.contains(m['name']),
                       onSelected: (v) => setState(() {
                         v ? _picked.add(m['name'] as String) : _picked.remove(m['name']);
@@ -643,7 +646,10 @@ class _NotesDialogState extends State<_NotesDialog> {
         FilledButton(
           onPressed: () {
             final parts = [..._picked, if (_extra.text.trim().isNotEmpty) _extra.text.trim()];
-            Navigator.pop(context, parts.join(' · '));
+            final extra = Catalog.modifiers()
+                .where((m) => _picked.contains(m['name']))
+                .fold<double>(0, (s, m) => s + n(m['price_delta']).toDouble());
+            Navigator.pop(context, {'notes': parts.join(' · '), 'extra': round2(extra)});
           },
           child: const Text('Save'),
         ),

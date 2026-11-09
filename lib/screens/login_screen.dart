@@ -94,9 +94,9 @@ class _LoginScreenState extends State<LoginScreen> {
                 const SizedBox(height: 28),
                 TextField(
                   controller: _email,
-                  keyboardType: TextInputType.emailAddress,
+                  autocorrect: false,
                   autofillHints: const [AutofillHints.username],
-                  decoration: const InputDecoration(labelText: 'Email'),
+                  decoration: const InputDecoration(labelText: 'Username'),
                 ),
                 const SizedBox(height: 12),
                 TextField(
@@ -115,6 +115,12 @@ class _LoginScreenState extends State<LoginScreen> {
                 FilledButton(
                   onPressed: _busy ? null : _signIn,
                   child: Text(_busy ? 'Signing in...' : 'Sign in'),
+                ),
+                const SizedBox(height: 16),
+                const Text(
+                  'Forgot your password? Ask your admin to set a new one.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Color(0xFFB8C3DE), fontSize: 13),
                 ),
               ],
             ),

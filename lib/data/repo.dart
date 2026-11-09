@@ -82,13 +82,18 @@ class CartLine {
     required this.price,
     this.qty = 1,
     this.notes = '',
+    this.extra = 0,
   });
   final String productId;
   final String name;
   final double price;
   int qty;
   String notes;
-  double get total => round2(price * qty);
+
+  /// Extra charge per item from special requests such as "Extra cheese".
+  double extra;
+  double get unitPrice => round2(price + extra);
+  double get total => round2(unitPrice * qty);
 }
 
 /// Creating and moving orders. Everything is written to the device first and
@@ -148,7 +153,7 @@ class OrderRepo {
         'product_id': l.productId,
         'name': l.name,
         'qty': l.qty,
-        'unit_price': l.price,
+        'unit_price': l.unitPrice,
         'notes': l.notes.trim().isEmpty ? null : l.notes.trim(),
         'done': false,
         'created_at': now,

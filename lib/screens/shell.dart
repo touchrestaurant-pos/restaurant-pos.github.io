@@ -1,13 +1,14 @@
 import 'package:flutter/material.dart';
 
 import '../auth/auth_service.dart';
-import '../data/repo.dart';
 import '../theme.dart';
 import '../widgets/brand_mark.dart';
+import '../widgets/change_password_dialog.dart';
 import '../widgets/sync_chip.dart';
 import 'cashier_screen.dart';
 import 'dashboard_screen.dart';
 import 'kitchen_screen.dart';
+import 'special_requests_screen.dart';
 import 'staff_screen.dart';
 
 class _Tab {
@@ -41,6 +42,7 @@ class _ShellState extends State<Shell> {
     const kitchen = _Tab('Kitchen', Icons.soup_kitchen, _kitchen);
     const dash = _Tab('Dashboard', Icons.dashboard_outlined, _dashboard);
     const staff = _Tab('Staff', Icons.badge_outlined, _staff);
+    const requests = _Tab('Requests', Icons.edit_note, _requests);
     switch (role) {
       case 'cashier':
         return const [order, dash];
@@ -51,7 +53,7 @@ class _ShellState extends State<Shell> {
       case 'supervisor':
         return const [order, kitchen, dash];
       case 'admin':
-        return const [dash, order, kitchen, staff];
+        return const [dash, order, kitchen, requests, staff];
       default:
         return const [dash];
     }
@@ -61,6 +63,7 @@ class _ShellState extends State<Shell> {
   static Widget _kitchen() => const KitchenScreen();
   static Widget _dashboard() => const DashboardScreen();
   static Widget _staff() => const StaffScreen();
+  static Widget _requests() => const SpecialRequestsScreen();
 
   @override
   Widget build(BuildContext context) {
@@ -88,16 +91,27 @@ class _ShellState extends State<Shell> {
           const SyncChip(),
           if (wide)
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8),
+              padding: const EdgeInsets.only(left: 8),
               child: Center(
                 child: Text('${auth.fullName} · ${_roleNames[auth.role] ?? auth.role}',
                     style: const TextStyle(fontWeight: FontWeight.w600)),
               ),
             ),
-          IconButton(
-            tooltip: 'Log out',
-            icon: const Icon(Icons.logout, color: Brand.gold),
-            onPressed: auth.signOut,
+          PopupMenuButton<String>(
+            tooltip: 'Account',
+            icon: const Icon(Icons.account_circle, color: Brand.gold),
+            onSelected: (v) {
+              if (v == 'password') showChangePasswordDialog(context);
+              if (v == 'logout') auth.signOut();
+            },
+            itemBuilder: (_) => [
+              PopupMenuItem(
+                enabled: false,
+                child: Text('${auth.fullName} · ${_roleNames[auth.role] ?? auth.role}'),
+              ),
+              const PopupMenuItem(value: 'password', child: Text('Change my password')),
+              const PopupMenuItem(value: 'logout', child: Text('Log out')),
+            ],
           ),
         ],
         bottom: const PreferredSize(

@@ -13,6 +13,11 @@ class AppConfig {
     defaultValue: 'https://kemnuculvkkyfzjnwvrp.supabase.co',
   );
 
+  /// Staff sign in with a username. Supabase needs an email, so the app turns
+  /// "thandi" into "thandi@<this domain>". Nobody ever receives mail there.
+  /// Must match STAFF_LOGIN_DOMAIN in supabase/functions/create-staff.
+  static const staffLoginDomain = 'touchrestaurant-pos.github.io';
+
   static const supabaseKey = String.fromEnvironment(
     'SUPABASE_KEY',
     defaultValue: 'sb_publishable_OAld3pVVrbDnWVWMJRXJtg_5y8oAUO6',

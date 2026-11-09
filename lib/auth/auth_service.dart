@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../config.dart';
 import '../data/local_store.dart';
 
 /// Signed-in staff member and their role (cashier, kitchen, stock, admin,
@@ -34,9 +35,15 @@ class AuthService extends ChangeNotifier {
   }
 
   /// Returns null on success, otherwise a message to show the user.
-  Future<String?> signIn(String email, String password) async {
+  Future<String?> signIn(String login, String password) async {
+    final typed = login.trim();
+    if (typed.isEmpty) return 'Enter your username.';
+    // A username becomes its hidden email; a full email (the owner) is used as typed.
+    final email = typed.contains('@')
+        ? typed
+        : '${typed.toLowerCase()}@${AppConfig.staffLoginDomain}';
     try {
-      await _db.auth.signInWithPassword(email: email.trim(), password: password);
+      await _db.auth.signInWithPassword(email: email, password: password);
       await _loadProfile();
       if (profile == null) return 'No staff profile was found for this user.';
       if (profile!['active'] == false) {
