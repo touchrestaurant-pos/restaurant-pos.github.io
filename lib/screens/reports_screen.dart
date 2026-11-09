@@ -20,6 +20,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
   DateTimeRange? _custom;
   Map<String, dynamic>? _data;
   Map<String, dynamic>? _prev;
+  Map<String, dynamic>? _refunds;
   String _metric = 'revenue';
   int _topN = 10;
   String _category = 'All';
@@ -95,6 +96,15 @@ class _ReportsScreenState extends State<ReportsScreen> {
       });
       _data = Map<String, dynamic>.from(res as Map);
       _loaded = range;
+      try {
+        final rf = await Supabase.instance.client.rpc('admin_refunds', params: {
+          'p_from': range.start.toUtc().toIso8601String(),
+          'p_to': range.end.toUtc().toIso8601String(),
+        });
+        _refunds = Map<String, dynamic>.from(rf as Map);
+      } catch (_) {
+        _refunds = null;
+      }
       try {
         final len = range.end.difference(range.start);
         final prev = await Supabase.instance.client.rpc('admin_report', params: {
@@ -336,6 +346,10 @@ class _ReportsScreenState extends State<ReportsScreen> {
             sub: 'Average ${money(n(s['avg_order']))}\n${_vs('summary', 'orders') ?? ''}'),
         _tile('Unpaid orders', '${unpaid['orders'] ?? 0}',
             sub: money(n(unpaid['total'])), color: n(unpaid['orders']) > 0 ? Brand.amber : null),
+        if (_refunds != null)
+          _tile('Refunds given', money(n(_refunds!['total'])),
+              sub: '${(_refunds!['items'] as List).length} refunds',
+              color: n(_refunds!['total']) > 0 ? Brand.red : null),
         _tile('Cancelled orders', '${voided['orders'] ?? 0}',
             sub: money(n(voided['total'])), color: n(voided['orders']) > 0 ? Brand.red : null),
       ]),
@@ -752,6 +766,20 @@ class _ReportsScreenState extends State<ReportsScreen> {
               ]
           ], right: {2}),
           note: 'A paid order that was cancelled needs a refund. Check these against the till.'),
+      if (_refunds != null)
+        _section(
+            'Refunds given',
+            _table(['Order', 'When', 'Amount', 'Method', 'Reason'], [
+              for (final r in (_refunds!['items'] as List).map((e) => Map<String, dynamic>.from(e as Map)))
+                [
+                  '#${r['ref']}',
+                  when(r['at']),
+                  money(n(r['amount'])),
+                  r['method'] == 'cash' ? 'Cash' : 'Card',
+                  '${r['reason'] ?? ''}',
+                ]
+            ], right: {2}),
+            note: 'Refunds are taken off the drawer in the cash-up on the day they are given.'),
     ]);
   }
 }
