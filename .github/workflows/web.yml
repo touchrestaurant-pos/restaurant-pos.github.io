@@ -1,0 +1,51 @@
+name: Deploy web
+
+# Builds the web app and publishes it to GitHub Pages.
+# Every push to main updates the live site. Pushes that only change .md files do not.
+# You can also press "Run workflow" on the Actions tab.
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Create web folder
+        run: |
+          flutter create --platforms=web --project-name restaurant_pos --org com.restaurantpos .
+          git checkout -- lib pubspec.yaml
+          rm -rf test
+      - run: flutter pub get
+      - run: flutter analyze --no-fatal-infos --no-fatal-warnings
+      - run: flutter build web --release --base-href /
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: build/web
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

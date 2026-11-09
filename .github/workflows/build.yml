@@ -1,6 +1,6 @@
 name: Build apps
 
-# Builds the web app, Android APK and Windows app on GitHub's servers,
+# Builds the Android APK and Windows app on GitHub's servers (the web app is in web.yml),
 # so nothing has to be installed on your own computer.
 # Runs on every push to main, or press "Run workflow" on the Actions tab.
 on:
@@ -9,27 +9,6 @@ on:
   workflow_dispatch:
 
 jobs:
-  web:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-          cache: true
-      - name: Create platform folders
-        run: |
-          flutter create --platforms=web --project-name restaurant_pos --org com.restaurantpos .
-          git checkout -- lib pubspec.yaml
-          rm -rf test
-      - run: flutter pub get
-      - run: flutter analyze --no-fatal-infos --no-fatal-warnings
-      - run: flutter build web --release
-      - uses: actions/upload-artifact@v4
-        with:
-          name: restaurant-pos-web
-          path: build/web
-
   android:
     runs-on: ubuntu-latest
     steps:
