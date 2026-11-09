@@ -88,6 +88,13 @@ class _CashierScreenState extends State<CashierScreen> {
       ..showSnackBar(SnackBar(content: Text(msg.toString())));
   }
 
+  Future<void> _showCancel() async {
+    await showDialog<void>(
+      context: context,
+      builder: (_) => const _CancelDialog(),
+    );
+  }
+
   Future<void> _showUnpaid() async {
     await showDialog<void>(
       context: context,
@@ -247,6 +254,7 @@ class _CashierScreenState extends State<CashierScreen> {
                         style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
                   ),
                   TextButton(onPressed: _showUnpaid, child: const Text('Unpaid orders')),
+                  TextButton(onPressed: _showCancel, child: const Text('Cancel an order')),
                 ],
               ),
               const SizedBox(height: 8),
@@ -731,6 +739,119 @@ class _UnpaidDialogState extends State<_UnpaidDialog> {
       actions: [
         TextButton(
             onPressed: () => Navigator.pop(context), child: const Text('Close')),
+      ],
+    );
+  }
+}
+
+/// Cancel an order that is still in the kitchen queue. The kitchen is alerted
+/// with the reason.
+class _CancelDialog extends StatefulWidget {
+  const _CancelDialog();
+
+  @override
+  State<_CancelDialog> createState() => _CancelDialogState();
+}
+
+class _CancelDialogState extends State<_CancelDialog> {
+  Future<String?> _askReason(String ref) {
+    final c = TextEditingController();
+    const quick = [
+      'Customer changed their mind',
+      'Wrong order captured',
+      'Waited too long',
+      'Customer left',
+    ];
+    return showDialog<String>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, set) => AlertDialog(
+          title: Text('Cancel order #$ref'),
+          content: SizedBox(
+            width: 400,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('The kitchen will see: "Cancelled by customer" with your reason.'),
+                const SizedBox(height: 10),
+                Wrap(spacing: 8, runSpacing: 8, children: [
+                  for (final q in quick)
+                    ActionChip(
+                        label: Text(q),
+                        onPressed: () => set(() => c.text = q)),
+                ]),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: c,
+                  autofocus: true,
+                  onChanged: (_) => set(() {}),
+                  decoration: const InputDecoration(labelText: 'Reason (required)'),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Back')),
+            FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: Brand.red),
+              onPressed: c.text.trim().isEmpty ? null : () => Navigator.pop(ctx, c.text.trim()),
+              child: const Text('Cancel order'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final open = LocalStore.rows('orders')
+        .where((o) => const ['new', 'in_progress', 'ready'].contains(o['status']))
+        .toList()
+      ..sort((a, b) => '${b['created_at']}'.compareTo('${a['created_at']}'));
+    return AlertDialog(
+      title: const Text('Cancel an order'),
+      content: SizedBox(
+        width: 460,
+        child: open.isEmpty
+            ? const Padding(
+                padding: EdgeInsets.symmetric(vertical: 24),
+                child: Text('No open orders to cancel.'))
+            : ListView.separated(
+                shrinkWrap: true,
+                itemCount: open.length,
+                separatorBuilder: (_, __) => const Divider(height: 1),
+                itemBuilder: (context, i) {
+                  final o = open[i];
+                  final items = OrderRepo.itemsFor(o['id'] as String);
+                  final summary = items.map((e) => '${e['qty']}× ${e['name']}').join(', ');
+                  return ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: Text(
+                        '#${o['order_ref']} · ${money(n(o['total']))}'
+                        '${o['paid'] == true ? ' · PAID' : ''}',
+                        style: const TextStyle(fontWeight: FontWeight.w700)),
+                    subtitle: Text(summary, maxLines: 2, overflow: TextOverflow.ellipsis),
+                    trailing: TextButton(
+                      style: TextButton.styleFrom(foregroundColor: Brand.red),
+                      onPressed: () async {
+                        final reason = await _askReason('${o['order_ref']}');
+                        if (reason == null) return;
+                        await OrderRepo.setStatus(o['id'] as String, 'void',
+                            voidReason:
+                                'Cancelled by customer: $reason (by ${AuthService.instance.fullName})');
+                        SyncService.instance.syncNow();
+                        if (mounted) setState(() {});
+                      },
+                      child: const Text('Cancel'),
+                    ),
+                  );
+                },
+              ),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close')),
       ],
     );
   }

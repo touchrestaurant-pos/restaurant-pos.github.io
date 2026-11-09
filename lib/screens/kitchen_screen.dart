@@ -26,6 +26,72 @@ class KitchenScreen extends StatefulWidget {
 class _KitchenScreenState extends State<KitchenScreen> {
   Timer? _tick;
   String _filter = 'all'; // all, new, progress, special
+  bool _alertOpen = false;
+
+  List<String> get _acked =>
+      ((LocalStore.getMeta('kitchen_ack') as List?) ?? const []).cast<String>();
+
+  /// Orders cancelled in the last 12 hours that this screen has not acknowledged.
+  List<Map<String, dynamic>> _cancelled() {
+    final cutoff = DateTime.now().subtract(const Duration(hours: 12));
+    final acked = _acked;
+    return LocalStore.rows('orders').where((o) {
+      final t = parseTime(o['voided_at']);
+      return o['status'] == 'void' &&
+          t != null &&
+          t.isAfter(cutoff) &&
+          !acked.contains(o['id']);
+    }).toList()
+      ..sort((a, b) => '${a['voided_at']}'.compareTo('${b['voided_at']}'));
+  }
+
+  Future<void> _ack(Iterable<String> ids) =>
+      LocalStore.setMeta('kitchen_ack', [..._acked, ...ids]);
+
+  void _maybeAlert(List<Map<String, dynamic>> cancelled) {
+    if (_alertOpen || cancelled.isEmpty) return;
+    _alertOpen = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: const Color(0xFF3A0F18),
+          title: const Row(children: [
+            Icon(Icons.cancel, color: Colors.white),
+            SizedBox(width: 10),
+            Text('ORDER CANCELLED', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800)),
+          ]),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              for (final o in cancelled) ...[
+                Text('#${o['order_ref']}',
+                    style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.w800)),
+                Text('${o['void_reason'] ?? 'Cancelled by customer'}',
+                    style: const TextStyle(color: _soft, fontSize: 16)),
+                const SizedBox(height: 12),
+              ],
+              const Text('Stop making these orders.',
+                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
+            ],
+          ),
+          actions: [
+            FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: _red),
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('OK, understood'),
+            ),
+          ],
+        ),
+      );
+      await _ack(cancelled.map((o) => o['id'] as String));
+      _alertOpen = false;
+      if (mounted) setState(() {});
+    });
+  }
 
   @override
   void initState() {
@@ -60,6 +126,8 @@ class _KitchenScreenState extends State<KitchenScreen> {
       listenable: SyncService.instance,
       builder: (context, _) {
         final all = LocalStore.rows('orders');
+        final cancelled = _cancelled();
+        _maybeAlert(cancelled);
         final active = all
             .where((o) => o['status'] == 'new' || o['status'] == 'in_progress')
             .toList()

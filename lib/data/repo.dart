@@ -185,6 +185,7 @@ class OrderRepo {
     if (status == 'ready') patch['ready_at'] = now;
     if (status == 'collected') patch['collected_at'] = now;
     if (voidReason != null) patch['void_reason'] = voidReason;
+    if (status == 'void') patch['voided_at'] = now;
     await LocalStore.upsert('orders', patch);
   }
 
