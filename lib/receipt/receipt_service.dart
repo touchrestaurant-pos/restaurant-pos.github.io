@@ -66,6 +66,18 @@ class ReceiptData {
   }
 }
 
+/// Slip paper: 80 mm rolls print 72 mm wide, 58 mm rolls print about 48 mm wide.
+int slipPaperMm() => (LocalStore.getMeta('slip_paper_mm') as int?) ?? 80;
+
+PdfPageFormat slipFormat() {
+  final printable = slipPaperMm() == 58 ? 48.0 : 72.0;
+  return PdfPageFormat(printable * PdfPageFormat.mm, double.infinity,
+      marginLeft: 2 * PdfPageFormat.mm,
+      marginRight: 2 * PdfPageFormat.mm,
+      marginTop: 3 * PdfPageFormat.mm,
+      marginBottom: 6 * PdfPageFormat.mm);
+}
+
 String _method(dynamic m) => m == 'cash' ? 'Cash' : 'Credit card';
 
 String _lineTotal(Map<String, dynamic> i) => money(n(i['qty']) * n(i['unit_price']));
@@ -117,7 +129,7 @@ String receiptText(ReceiptData r) {
   return b.toString();
 }
 
-/// 80 mm roll PDF, the width of a standard slip printer.
+/// Roll PDF sized to the printable width of a standard slip printer.
 Future<Uint8List> receiptPdf(ReceiptData r) async {
   final c = r.company;
   pw.ImageProvider? logo;
@@ -149,7 +161,7 @@ Future<Uint8List> receiptPdf(ReceiptData r) async {
 
   final doc = pw.Document(title: 'Receipt ${r.ref}', author: r.companyName);
   doc.addPage(pw.Page(
-    pageFormat: PdfPageFormat(80 * PdfPageFormat.mm, double.infinity, marginAll: 4 * PdfPageFormat.mm),
+    pageFormat: slipFormat(),
     build: (ctx) {
       final vatNo = '${c['vat_number'] ?? ''}'.trim();
       final footer = '${c['receipt_footer'] ?? ''}'.trim();
@@ -195,7 +207,6 @@ Future<Uint8List> receiptPdf(ReceiptData r) async {
         if (r.refunded > 0) row('Refunded', money(r.refunded), bold: true, size: 8),
         if (footer.isNotEmpty) ...[pw.SizedBox(height: 8), center(footer, t(8))],
         pw.SizedBox(height: 6),
-        center('Thank you', t(8)),
       ]);
     },
   ));
@@ -205,7 +216,9 @@ Future<Uint8List> receiptPdf(ReceiptData r) async {
 Future<void> printSlip(ReceiptData r) async {
   await Printing.layoutPdf(
     name: 'Receipt-${r.ref}',
-    format: PdfPageFormat(80 * PdfPageFormat.mm, double.infinity, marginAll: 4 * PdfPageFormat.mm),
+    format: slipFormat(),
+    dynamicLayout: false,
+    usePrinterSettings: false,
     onLayout: (_) => receiptPdf(r),
   );
 }
@@ -389,7 +402,19 @@ class _ReceiptDialogState extends State<_ReceiptDialog> {
       actionsAlignment: MainAxisAlignment.spaceBetween,
       actionsOverflowButtonSpacing: 6,
       actions: [
-        Wrap(spacing: 6, children: [
+        Wrap(spacing: 6, crossAxisAlignment: WrapCrossAlignment.center, children: [
+          DropdownButton<int>(
+            value: slipPaperMm(),
+            underline: const SizedBox(),
+            items: const [
+              DropdownMenuItem(value: 80, child: Text('80 mm slip')),
+              DropdownMenuItem(value: 58, child: Text('58 mm slip')),
+            ],
+            onChanged: (v) async {
+              await LocalStore.setMeta('slip_paper_mm', v ?? 80);
+              setState(() {});
+            },
+          ),
           FilledButton.icon(
               style: FilledButton.styleFrom(backgroundColor: Brand.navy),
               onPressed: () async {
