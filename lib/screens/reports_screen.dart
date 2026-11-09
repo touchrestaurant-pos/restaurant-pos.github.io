@@ -3,7 +3,10 @@ import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../data/repo.dart';
+import '../receipt/download_file.dart';
+import '../receipt/report_export.dart';
 import '../theme.dart';
+import '../widgets/brand_mark.dart' show companyDisplayName;
 import 'report_charts.dart';
 
 /// Admin reports. All figures are calculated on the server for the chosen dates,
@@ -123,6 +126,37 @@ class _ReportsScreenState extends State<ReportsScreen> {
     if (mounted) setState(() => _loading = false);
   }
 
+  String get _periodText {
+    final r = _loaded;
+    if (r == null) return '';
+    final last = r.end.subtract(const Duration(days: 1));
+    return _dateText(r.start) == _dateText(last)
+        ? _dateText(r.start)
+        : '${_dateText(r.start)} to ${_dateText(last)}';
+  }
+
+  Future<void> _download(String kind, int tab) async {
+    final d = _data;
+    if (d == null) return;
+    try {
+      if (kind == 'csv') {
+        final bytes = reportCsv(tab, _periodText, d, _refunds);
+        await downloadBytes(
+            '${reportTabNames[tab].replaceAll(' ', '-')}_$_periodText.csv'.replaceAll(' ', '_'),
+            bytes,
+            'text/csv');
+      } else {
+        final bytes = await reportPdf(companyDisplayName(), _periodText, d, _refunds);
+        await downloadBytes('Reports_${_periodText.replaceAll(' ', '_')}.pdf', bytes, 'application/pdf');
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('Could not create the download.')));
+      }
+    }
+  }
+
   String _dateText(DateTime d) =>
       '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
 
@@ -151,6 +185,24 @@ class _ReportsScreenState extends State<ReportsScreen> {
                           style: TextStyle(
                               fontSize: 24, fontWeight: FontWeight.w800, color: Brand.navy)),
                     ),
+                    Builder(
+                      builder: (ctx) => PopupMenuButton<String>(
+                        enabled: _data != null,
+                        tooltip: 'Download reports',
+                        onSelected: (v) => _download(v, DefaultTabController.of(ctx).index),
+                        itemBuilder: (_) => const [
+                          PopupMenuItem(value: 'csv', child: Text('Excel (CSV) - the tab you are on')),
+                          PopupMenuItem(value: 'pdf', child: Text('PDF - all reports')),
+                        ],
+                        child: IgnorePointer(
+                          child: FilledButton.icon(
+                              onPressed: _data == null ? null : () {},
+                              icon: const Icon(Icons.download, size: 18),
+                              label: const Text('Download')),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
                     OutlinedButton.icon(
                         onPressed: _loading ? null : _load,
                         icon: const Icon(Icons.refresh, size: 18),

@@ -96,7 +96,8 @@ class SyncService extends ChangeNotifier {
         if (item['op'] == 'delete') {
           await _db.from(table).delete().eq('id', row['id']);
         } else {
-          await _db.from(table).upsert(row);
+          // A payment is never edited. If a retry finds it already saved, that is fine.
+          await _db.from(table).upsert(row, ignoreDuplicates: table == 'payments');
         }
         await LocalStore.removePending(entry.key);
       } on PostgrestException catch (e) {

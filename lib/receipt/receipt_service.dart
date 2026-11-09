@@ -11,6 +11,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../auth/auth_service.dart';
 import '../data/local_store.dart';
 import '../data/repo.dart';
+import '../data/sync_service.dart';
 import '../theme.dart';
 
 /// Everything printed on a customer receipt.
@@ -324,6 +325,7 @@ class _ReceiptDialogState extends State<_ReceiptDialog> {
     final amount = TextEditingController(text: remaining.toStringAsFixed(2));
     final reason = TextEditingController();
     String method = r.payments.isNotEmpty ? '${r.payments.first['method']}' : 'cash';
+    bool restock = !r.cancelled;
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => StatefulBuilder(builder: (ctx, set) {
@@ -356,6 +358,20 @@ class _ReceiptDialogState extends State<_ReceiptDialog> {
                   controller: reason,
                   onChanged: (_) => set(() {}),
                   decoration: const InputDecoration(labelText: 'Reason (required)')),
+              if (r.cancelled)
+                const Padding(
+                    padding: EdgeInsets.only(top: 8),
+                    child: Text('This order was cancelled, so its ingredients are already back in stock.',
+                        style: TextStyle(color: Brand.muted, fontSize: 12)))
+              else
+                CheckboxListTile(
+                  contentPadding: EdgeInsets.zero,
+                  controlAffinity: ListTileControlAffinity.leading,
+                  value: restock,
+                  onChanged: (v) => set(() => restock = v ?? false),
+                  title: const Text('Put the ingredients back in stock'),
+                  subtitle: const Text('Tick if the food was not made or can be reused. Leave unticked if it was made and wasted.'),
+                ),
             ]),
           ),
           actions: [
@@ -375,9 +391,11 @@ class _ReceiptDialogState extends State<_ReceiptDialog> {
         'p_amount': double.parse(amount.text.replaceAll(',', '.')),
         'p_method': method,
         'p_reason': reason.text.trim(),
+        'p_restock': restock && !r.cancelled,
       });
       await _loadRefunds();
       _say('Refund recorded.');
+      await SyncService.instance.syncNow();
     } on PostgrestException catch (e) {
       _say(e.message);
     } catch (_) {
