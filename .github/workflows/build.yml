@@ -48,7 +48,14 @@ jobs:
           git checkout -- lib pubspec.yaml
           rm -rf test
       - run: flutter pub get
-      - run: flutter build apk --release
+      - name: Build APK (retries, because downloads from GitHub and Maven sometimes time out)
+        run: |
+          for i in 1 2 3; do
+            flutter build apk --release && exit 0
+            echo "Attempt $i failed, trying again in 30 seconds"
+            sleep 30
+          done
+          exit 1
       - uses: actions/upload-artifact@v4
         with:
           name: restaurant-pos-android-apk
