@@ -361,7 +361,7 @@ class _ReceiptDialogState extends State<_ReceiptDialog> {
           actions: [
             TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
             FilledButton(
-                style: FilledButton.styleFrom(backgroundColor: Brand.red),
+                style: FilledButton.styleFrom(backgroundColor: Brand.red, foregroundColor: Colors.white),
                 onPressed: valid ? () => Navigator.pop(ctx, true) : null,
                 child: const Text('Refund')),
           ],
@@ -416,7 +416,7 @@ class _ReceiptDialogState extends State<_ReceiptDialog> {
             },
           ),
           FilledButton.icon(
-              style: FilledButton.styleFrom(backgroundColor: Brand.navy),
+              style: FilledButton.styleFrom(backgroundColor: Brand.navy, foregroundColor: Colors.white),
               onPressed: () async {
                 try {
                   await printSlip(r);

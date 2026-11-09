@@ -80,7 +80,7 @@ class _KitchenScreenState extends State<KitchenScreen> {
           ),
           actions: [
             FilledButton(
-              style: FilledButton.styleFrom(backgroundColor: _red),
+              style: FilledButton.styleFrom(backgroundColor: _red, foregroundColor: Colors.white),
               onPressed: () => Navigator.pop(ctx),
               child: const Text('OK, understood'),
             ),

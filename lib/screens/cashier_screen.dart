@@ -809,7 +809,7 @@ class _CancelDialogState extends State<_CancelDialog> {
           actions: [
             TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Back')),
             FilledButton(
-              style: FilledButton.styleFrom(backgroundColor: Brand.red),
+              style: FilledButton.styleFrom(backgroundColor: Brand.red, foregroundColor: Colors.white),
               onPressed: c.text.trim().isEmpty ? null : () => Navigator.pop(ctx, c.text.trim()),
               child: const Text('Cancel order'),
             ),

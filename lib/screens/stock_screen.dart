@@ -665,7 +665,7 @@ class _GrvEditorState extends State<_GrvEditor> {
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Keep')),
           FilledButton(
-              style: FilledButton.styleFrom(backgroundColor: Brand.red),
+              style: FilledButton.styleFrom(backgroundColor: Brand.red, foregroundColor: Colors.white),
               onPressed: () => Navigator.pop(ctx, true),
               child: const Text('Delete')),
         ],
