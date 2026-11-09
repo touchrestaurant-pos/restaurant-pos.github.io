@@ -79,6 +79,17 @@ class LocalStore {
         .toList();
   }
 
+  /// Give refused changes another chance (for example after a server fix).
+  static Future<void> resetAttempts() async {
+    for (final k in _outbox.keys.cast<String>().toList()) {
+      final item = Map<String, dynamic>.from(_outbox.get(k) as Map);
+      if ((item['attempts'] ?? 0) != 0) {
+        item['attempts'] = 0;
+        await _outbox.put(k, item);
+      }
+    }
+  }
+
   static Future<void> removePending(String key) => _outbox.delete(key);
 
   static Future<void> markFailed(String key, String error) async {

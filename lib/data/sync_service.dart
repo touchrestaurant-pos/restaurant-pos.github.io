@@ -49,6 +49,7 @@ class SyncService extends ChangeNotifier {
   int get pendingCount => LocalStore.pendingCount;
 
   void start() {
+    LocalStore.resetAttempts();
     _connSub ??= Connectivity().onConnectivityChanged.listen((results) {
       final nowOnline = !results.contains(ConnectivityResult.none);
       if (nowOnline != online) {
