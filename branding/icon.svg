@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#2C4585"/><stop offset="1" stop-color="#14245A"/></linearGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFC82E"/><stop offset="1" stop-color="#E8A900"/></linearGradient>
+  </defs>
+  <rect width="1024" height="1024" rx="230" fill="url(#bg)"/>
+  <!-- receipt -->
+  <path d="M352 150h320v170H352z" fill="#fff"/>
+  <path d="M352 320l13.33 24l13.33 -24l13.33 24l13.33 -24l13.33 24l13.33 -24l13.33 24l13.33 -24l13.33 24l13.33 -24l13.33 24l13.33 -24l13.33 24l13.33 -24l13.33 24l13.33 -24l13.33 24l13.33 -24l13.33 24l13.33 -24l13.33 24l13.33 -24l13.33 24l13.33 -24V150H672z" fill="#fff"/>
+  <rect x="392" y="190" width="160" height="16" rx="8" fill="#14245A" opacity=".55"/>
+  <rect x="392" y="230" width="240" height="16" rx="8" fill="#14245A" opacity=".35"/>
+  <rect x="392" y="270" width="110" height="16" rx="8" fill="#E8A900"/>
+  <!-- terminal body -->
+  <rect x="204" y="390" width="616" height="470" rx="70" fill="url(#gold)"/>
+  <!-- screen -->
+  <rect x="252" y="436" width="520" height="150" rx="34" fill="#14245A"/>
+  <text x="730" y="548" font-family="Arial, Helvetica, sans-serif" font-weight="800" font-size="92" fill="#FFC82E" text-anchor="end">R 249</text>
+  <!-- keypad -->
+  <g fill="#14245A">
+    <rect x="262" y="626" width="120" height="76" rx="22"/><rect x="452" y="626" width="120" height="76" rx="22"/><rect x="642" y="626" width="120" height="76" rx="22"/>
+    <rect x="262" y="738" width="120" height="76" rx="22"/><rect x="452" y="738" width="120" height="76" rx="22"/>
+  </g>
+  <rect x="642" y="738" width="120" height="76" rx="22" fill="#fff"/>
+  <path d="M676 776l22 20 40-42" stroke="#14245A" stroke-width="14" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
