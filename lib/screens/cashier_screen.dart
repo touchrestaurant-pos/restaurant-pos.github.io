@@ -973,13 +973,13 @@ class _OpenOrdersDialogState extends State<_OpenOrdersDialog> {
   Future<void> _pay(Map<String, dynamic> o) async {
     final id = o['id'] as String;
     var balance = OrderRepo.balance(id);
-    var no = OrderRepo.paymentsFor(id).length + 1;
     while (balance > 0.005) {
-      final p = await showPaymentDialog(context, balance, alreadyPaid: OrderRepo.paidAmount(id), paymentNo: no);
-      if (p == null) break;
-      await OrderRepo.pay(id, p);
+      final got = await showPaymentDialog(context, balance, alreadyPaid: OrderRepo.paidAmount(id));
+      if (got == null) break;
+      for (final p in got) {
+        await OrderRepo.pay(id, p);
+      }
       balance = OrderRepo.balance(id);
-      no++;
     }
     SyncService.instance.syncNow();
     if (!mounted) return;

@@ -160,4 +160,42 @@ void main() {
     expect(t.vat, 11.74);
     expect(Totals(50, 0, 15, standardTotal: 0).vat, 0, reason: 'all zero-rated');
   });
+
+  group('paying with cash, card or both', () {
+    test('R150 bill: R100 cash and the R50 balance on card', () {
+      final r = splitTender(due: 150, cash: 100, card: 50);
+      expect(r.error, isNull);
+      expect(r.remaining, 0);
+      expect(r.change, 0);
+      expect(r.payments.map((p) => '${p['method']}:${p['amount']}').toList(), ['cash:100.0', 'card_manual:50.0']);
+    });
+    test('cash and card together may not be more than the bill', () {
+      expect(splitTender(due: 150, cash: 100, card: 60).error, isNotNull);
+      expect(splitTender(due: 150, card: 151).error, isNotNull);
+      expect(splitTender(due: 150, cash: 200, card: 10).error, isNotNull);
+    });
+    test('cash only gives change', () {
+      final r = splitTender(due: 150, cash: 200);
+      expect(r.change, 50);
+      expect(r.payments.single['amount'], 150);
+      expect(r.payments.single['tendered'], 200);
+    });
+    test('part payment leaves a balance', () {
+      final r = splitTender(due: 150, cash: 100);
+      expect(r.remaining, 50);
+      expect(r.change, 0);
+      expect(splitTender(due: 150, card: 75).remaining, 75);
+    });
+    test('tip goes on the card when a card is used, otherwise out of the cash', () {
+      final mixed = splitTender(due: 150, cash: 100, card: 50, tip: 10);
+      expect(mixed.payments[0]['tip'], 0);
+      expect(mixed.payments[1]['tip'], 10);
+      final cash = splitTender(due: 150, cash: 200, tip: 10);
+      expect(cash.change, 40);
+      expect(cash.payments.single['tip'], 10);
+    });
+    test('nothing entered is not a payment', () {
+      expect(splitTender(due: 150).payments, isEmpty);
+    });
+  });
 }

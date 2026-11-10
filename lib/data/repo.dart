@@ -162,6 +162,62 @@ class Totals {
   double get subtotal => round2(total - vat);
 }
 
+/// Result of paying a bill with cash, card or both.
+class TenderResult {
+  TenderResult({required this.payments, required this.change, required this.remaining, this.error});
+  final List<Map<String, dynamic>> payments;
+  final double change;
+
+  /// What is still owed after these payments.
+  final double remaining;
+
+  /// Set when the amounts are not allowed (for example cash + card above the bill).
+  final String? error;
+}
+
+/// Works out the payments for a bill of [due] from the cash handed over, the
+/// amount put on card and an optional tip.
+///
+/// - Cash only: more than the bill gives change.
+/// - Card (alone or with cash): the two together may never exceed the bill,
+///   so no change is ever owed on a card or mixed payment.
+/// - Less than the bill is a part payment; the rest stays owed.
+/// - The tip goes on the card when a card is used, otherwise it comes out of the cash.
+TenderResult splitTender({required double due, double cash = 0, double card = 0, double tip = 0}) {
+  due = round2(due);
+  cash = round2(max(0, cash));
+  card = round2(max(0, card));
+  tip = round2(max(0, tip));
+  TenderResult bad(String m) => TenderResult(payments: const [], change: 0, remaining: due, error: m);
+  final tipOnCard = card > 0;
+  final cashForBill = round2(max(0, cash - (tipOnCard ? 0 : tip)));
+  if (card > due + 0.005) return bad('The card amount is more than the ${money(due)} owed.');
+  if (card > 0 && cashForBill + card > due + 0.005) {
+    return bad('Cash and card together are more than the ${money(due)} owed. '
+        'Put ${money(max(0, due - cashForBill))} on the card.');
+  }
+  if (cashForBill <= 0 && card <= 0) {
+    return TenderResult(payments: const [], change: 0, remaining: due);
+  }
+  final cashApplied = round2(min(due, cashForBill));
+  final change = card > 0 ? 0.0 : round2(max(0, cashForBill - due));
+  return TenderResult(
+    payments: [
+      if (cashApplied > 0)
+        {
+          'method': 'cash',
+          'amount': cashApplied,
+          'tip': tipOnCard ? 0.0 : tip,
+          'tendered': cash,
+          'change_given': change,
+        },
+      if (card > 0) {'method': 'card_manual', 'amount': card, 'tip': tip},
+    ],
+    change: change,
+    remaining: round2(max(0, due - cashApplied - card)),
+  );
+}
+
 /// Creating and changing orders. Everything is written to the device first and
 /// uploaded later, so it works without internet.
 class OrderRepo {
