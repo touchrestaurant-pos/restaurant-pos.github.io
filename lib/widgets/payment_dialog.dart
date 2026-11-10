@@ -65,9 +65,10 @@ class _PaymentDialogState extends State<_PaymentDialog> {
   late bool _cashOk;
   late bool _cardOk;
   late String _method;
-  bool _split = false;
+
+  /// Cash: what the customer hands over. Card: what goes on the card.
+  /// Less than what is owed = part payment; more (cash only) = change.
   late final TextEditingController _amount;
-  late final TextEditingController _tendered;
   final _tip = TextEditingController();
 
   @override
@@ -79,43 +80,38 @@ class _PaymentDialogState extends State<_PaymentDialog> {
     if (!_cashOk && !_cardOk) _cashOk = true;
     _method = _cashOk ? 'cash' : 'card_manual';
     _amount = TextEditingController(text: widget.due.toStringAsFixed(2));
-    _tendered = TextEditingController(text: widget.due.toStringAsFixed(2));
   }
 
   @override
   void dispose() {
     _amount.dispose();
-    _tendered.dispose();
     _tip.dispose();
     super.dispose();
   }
 
   double _num(TextEditingController c) => double.tryParse(c.text.replaceAll(',', '.')) ?? 0;
-  double get _payAmount => _split ? round2(min(_num(_amount), widget.due)) : widget.due;
+  bool get _cash => _method == 'cash';
+  double get _entered => round2(max(0, _num(_amount)));
   double get _tipValue => round2(max(0, _num(_tip)));
-  double get _change => max(0, round2(_num(_tendered) - _payAmount - _tipValue));
 
-  bool get _valid {
-    if (_payAmount <= 0) return false;
-    if (_method == 'cash') return _num(_tendered) + 0.001 >= _payAmount + _tipValue;
-    return true;
-  }
+  /// How much of the bill this payment covers.
+  double get _applied =>
+      round2(max(0, min(widget.due, _cash ? _entered - _tipValue : _entered)));
+  double get _change => _cash ? round2(max(0, _entered - _tipValue - widget.due)) : 0;
+  double get _remaining => round2(max(0, widget.due - _applied));
+  bool get _valid => _applied > 0;
 
   void _confirm() {
-    final base = {'method': _method, 'amount': _payAmount, 'tip': _tipValue};
-    if (_method == 'cash') {
-      Navigator.pop(context, {
-        ...base,
-        'tendered': round2(_num(_tendered)),
-        'change_given': _change,
-      });
+    final base = {'method': _method, 'amount': _applied, 'tip': _tipValue};
+    if (_cash) {
+      Navigator.pop(context, {...base, 'tendered': _entered, 'change_given': _change});
     } else {
       Navigator.pop(context, base);
     }
   }
 
   List<double> _quick() {
-    final d = _payAmount + _tipValue;
+    final d = widget.due + _tipValue;
     final set = <double>{
       (d / 10).ceil() * 10.0,
       (d / 50).ceil() * 50.0,
@@ -125,25 +121,23 @@ class _PaymentDialogState extends State<_PaymentDialog> {
     return set.where((v) => v > d).toList()..sort();
   }
 
+  void _set(double v) => setState(() => _amount.text = v.toStringAsFixed(2));
+
   void _splitEvenly(int people) {
     final share = (widget.due / people * 100).ceil() / 100;
-    setState(() {
-      _split = true;
-      _amount.text = min(share, widget.due).toStringAsFixed(2);
-      _tendered.text = _amount.text;
-    });
+    _set(min(share, widget.due) + (_cash ? _tipValue : 0));
   }
 
   @override
   Widget build(BuildContext context) {
-    final showDue = _payAmount + _tipValue;
+    final part = _remaining > 0.005;
     return AlertDialog(
       title: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(widget.paymentNo > 1 ? 'Payment ${widget.paymentNo}' : 'Payment',
+          Text(widget.alreadyPaid > 0 ? 'Still to pay' : 'To pay',
               style: const TextStyle(fontWeight: FontWeight.w800)),
-          Text(money(showDue), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 26)),
+          Text(money(widget.due), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 26)),
         ],
       ),
       content: SizedBox(
@@ -156,7 +150,7 @@ class _PaymentDialogState extends State<_PaymentDialog> {
               if (widget.alreadyPaid > 0)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 10),
-                  child: Text('Already paid ${money(widget.alreadyPaid)} · still owed ${money(widget.due)}',
+                  child: Text('Already paid ${money(widget.alreadyPaid)}',
                       style: const TextStyle(color: Brand.muted, fontWeight: FontWeight.w600)),
                 ),
               SegmentedButton<String>(
@@ -165,95 +159,69 @@ class _PaymentDialogState extends State<_PaymentDialog> {
                   if (_cardOk) const ButtonSegment(value: 'card_manual', label: Text('Card')),
                 ],
                 selected: {_method},
-                onSelectionChanged: (s) => setState(() => _method = s.first),
+                onSelectionChanged: (s) => setState(() {
+                  _method = s.first;
+                  // A card can never be charged more than what is owed.
+                  if (!_cash && _entered > widget.due) _amount.text = widget.due.toStringAsFixed(2);
+                }),
+              ),
+              const SizedBox(height: 14),
+              TextField(
+                controller: _amount,
+                autofocus: true,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                onChanged: (_) => setState(() {}),
+                onTap: () => _amount.selection = TextSelection(baseOffset: 0, extentOffset: _amount.text.length),
+                style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w800),
+                decoration: InputDecoration(
+                    labelText: _cash ? 'Cash received from customer' : 'Amount on card',
+                    prefixText: 'R ',
+                    helperText: 'Enter less than ${money(widget.due)} to pay part now and the rest another way'),
               ),
               const SizedBox(height: 10),
-              Row(children: [
-                Expanded(
-                  child: CheckboxListTile(
-                    contentPadding: EdgeInsets.zero,
-                    controlAffinity: ListTileControlAffinity.leading,
-                    dense: true,
-                    value: _split,
-                    onChanged: (v) => setState(() {
-                      _split = v ?? false;
-                      if (!_split) _amount.text = widget.due.toStringAsFixed(2);
-                    }),
-                    title: const Text('Split bill (pay part now)'),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  OutlinedButton(
+                    onPressed: () => _set(widget.due + (_cash ? _tipValue : 0)),
+                    child: Text(_cash ? 'Exact' : 'Full amount'),
                   ),
-                ),
-                PopupMenuButton<int>(
-                  tooltip: 'Split evenly',
-                  onSelected: _splitEvenly,
-                  itemBuilder: (_) => [
-                    for (final p in [2, 3, 4, 5, 6]) PopupMenuItem(value: p, child: Text('Split between $p')),
-                  ],
-                  child: const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                    child: Text('Split evenly ▾', style: TextStyle(fontWeight: FontWeight.w700, color: Brand.navy)),
+                  if (_cash)
+                    for (final v in _quick())
+                      OutlinedButton(onPressed: () => _set(v), child: Text('R${v.toStringAsFixed(0)}')),
+                  PopupMenuButton<int>(
+                    tooltip: 'Split evenly',
+                    onSelected: _splitEvenly,
+                    itemBuilder: (_) => [
+                      for (final p in [2, 3, 4, 5, 6]) PopupMenuItem(value: p, child: Text('Split between $p people')),
+                    ],
+                    child: const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                      child: Text('Split evenly ▾', style: TextStyle(fontWeight: FontWeight.w700, color: Brand.navy)),
+                    ),
                   ),
-                ),
-              ]),
-              if (_split)
-                TextField(
-                  controller: _amount,
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                  onChanged: (_) => setState(() {}),
-                  decoration: InputDecoration(
-                      labelText: 'Amount for this payment', prefixText: 'R ', helperText: 'Up to ${money(widget.due)}'),
-                ),
-              const SizedBox(height: 10),
+                ],
+              ),
+              const SizedBox(height: 12),
               TextField(
                 controller: _tip,
                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
                 onChanged: (_) => setState(() {}),
-                decoration: const InputDecoration(labelText: 'Tip (optional)', prefixText: 'R ', isDense: true),
+                decoration: InputDecoration(
+                    labelText: 'Tip (optional)',
+                    prefixText: 'R ',
+                    isDense: true,
+                    helperText: _cash ? 'Kept out of the cash received' : 'Added on top of the card amount'),
               ),
               const SizedBox(height: 14),
-              if (_method == 'cash') ...[
-                TextField(
-                  controller: _tendered,
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                  onChanged: (_) => setState(() {}),
-                  style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w800),
-                  decoration: const InputDecoration(labelText: 'Amount tendered', prefixText: 'R '),
-                ),
-                const SizedBox(height: 10),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    OutlinedButton(
-                      onPressed: () => setState(() => _tendered.text = showDue.toStringAsFixed(2)),
-                      child: const Text('Exact'),
-                    ),
-                    for (final v in _quick())
-                      OutlinedButton(
-                        onPressed: () => setState(() => _tendered.text = v.toStringAsFixed(2)),
-                        child: Text('R${v.toStringAsFixed(0)}'),
-                      ),
-                  ],
-                ),
-                const SizedBox(height: 14),
-                Container(
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(color: const Color(0xFFE3F3EA), borderRadius: BorderRadius.circular(12)),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text('Change due', style: TextStyle(fontWeight: FontWeight.w700, color: Color(0xFF0F5733))),
-                      Text(money(_change),
-                          style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w800, color: Color(0xFF0F5733))),
-                    ],
-                  ),
-                ),
-              ] else ...[
-                Container(
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(color: const Color(0xFFE8EEFB), borderRadius: BorderRadius.circular(12)),
-                  child: Text('Take ${money(showDue)} on the card machine, then press Record card payment.',
-                      style: const TextStyle(fontWeight: FontWeight.w700, color: Brand.navy)),
-                ),
+              if (!_cash)
+                _box(const Color(0xFFE8EEFB), Brand.navy, 'Charge on card machine', money(_applied + _tipValue)),
+              if (_cash && !part) _box(const Color(0xFFE3F3EA), const Color(0xFF0F5733), 'Change to give', money(_change)),
+              if (part) ...[
+                if (!_cash) const SizedBox(height: 8),
+                _box(const Color(0xFFFFF4D6), const Color(0xFF7A4B00), 'Left to pay after this', money(_remaining)),
               ],
             ],
           ),
@@ -263,9 +231,23 @@ class _PaymentDialogState extends State<_PaymentDialog> {
         TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
         FilledButton(
           onPressed: _valid ? _confirm : null,
-          child: Text(_method == 'cash' ? 'Record cash payment' : 'Record card payment'),
+          child: Text(part
+              ? 'Take ${money(_applied)} ${_cash ? 'cash' : 'card'}, then the rest'
+              : (_cash ? 'Record cash payment' : 'Record card payment')),
         ),
       ],
     );
   }
+
+  Widget _box(Color bg, Color fg, String label, String value) => Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(12)),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(label, style: TextStyle(fontWeight: FontWeight.w700, color: fg)),
+            Text(value, style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800, color: fg)),
+          ],
+        ),
+      );
 }

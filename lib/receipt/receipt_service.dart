@@ -112,6 +112,30 @@ String _lineTotal(Map<String, dynamic> i) => money(n(i['qty']) * n(i['unit_price
 final _when = DateFormat('yyyy-MM-dd HH:mm');
 String _rate() => vatRate().toStringAsFixed(vatRate() == vatRate().roundToDouble() ? 0 : 1);
 
+/// How the bill was paid. One payment reads "Paid by Cash"; a split bill lists
+/// each part and a total. Cash received and change show only when change was given.
+List<RLine> _paymentLines(ReceiptData r) {
+  final pays = r.payments;
+  if (pays.isEmpty) return const [];
+  final split = pays.length > 1;
+  final out = <RLine>[];
+  if (split) out.add(const RLine.row('PAYMENTS', '', size: 8, bold: true));
+  for (final p in pays) {
+    out.add(RLine.row(split ? '  ${_method(p['method'])}' : 'Paid by ${_method(p['method'])}', money(n(p['amount'])), size: 8));
+  }
+  if (split) out.add(RLine.row('Total paid', money(r.paidAmount), size: 8, bold: true));
+  if (r.tips > 0) out.add(RLine.row('Tip (thank you)', money(r.tips), size: 8));
+  final received = pays
+      .where((p) => p['method'] == 'cash' && n(p['change_given']) > 0)
+      .fold<double>(0, (s, p) => s + n(p['tendered']).toDouble());
+  final change = pays.fold<double>(0, (s, p) => s + n(p['change_given']).toDouble());
+  if (change > 0) {
+    out.add(RLine.row('Cash received', money(received), size: 8));
+    out.add(RLine.row('Change', money(change), size: 8));
+  }
+  return out;
+}
+
 /// Zero-rated and exempt items, shown separately as a tax invoice requires.
 List<RLine> _vatSplit(ReceiptData r) {
   final byType = <String, double>{};
@@ -170,16 +194,7 @@ List<RLine> receiptLines(ReceiptData r) {
     RLine.row('VAT ${_rate()}%', money(r.vat), size: 8),
     ..._vatSplit(r),
     const RLine.gap(),
-    for (final p in r.payments) ...[
-      RLine.row('Paid by ${_method(p['method'])}', money(n(p['amount'])), size: 8),
-      if (n(p['tip']) > 0) RLine.row('  Tip', money(n(p['tip'])), size: 8),
-      if (p['method'] == 'cash' && n(p['tendered']) > 0) ...[
-        RLine.row('  Tendered', money(n(p['tendered'])), size: 8),
-        RLine.row('  Change', money(n(p['change_given'])), size: 8),
-      ],
-      if (p['method'] != 'cash' && '${p['card_last4'] ?? ''}'.isNotEmpty)
-        RLine.row('  Card ending', '${p['card_last4']}', size: 8),
-    ],
+    ..._paymentLines(r),
     if (!r.paid && !r.cancelled) RLine.row('STILL TO PAY', money(r.total - r.paidAmount), bold: true, size: 10),
     if (r.refunded > 0) RLine.row('Refunded', money(r.refunded), bold: true, size: 8),
     if (footer.isNotEmpty) ...[const RLine.gap(), RLine.center(footer, size: 8)],
