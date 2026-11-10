@@ -70,6 +70,7 @@ class _PaymentDialogState extends State<_PaymentDialog> {
   /// Less than what is owed = part payment; more (cash only) = change.
   late final TextEditingController _amount;
   final _tip = TextEditingController();
+  bool _showTip = false;
 
   @override
   void initState() {
@@ -176,9 +177,20 @@ class _PaymentDialogState extends State<_PaymentDialog> {
                 decoration: InputDecoration(
                     labelText: _cash ? 'Cash received from customer' : 'Amount on card',
                     prefixText: 'R ',
-                    helperText: 'Enter less than ${money(widget.due)} to pay part now and the rest another way'),
+                    isDense: true),
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 8),
+              if (part)
+                _box(const Color(0xFFFFF4D6), const Color(0xFF7A4B00), 'Balance still to pay', money(_remaining))
+              else if (_cash)
+                _box(const Color(0xFFE3F3EA), const Color(0xFF0F5733), 'Change to give', money(_change))
+              else
+                _box(const Color(0xFFE3F3EA), const Color(0xFF0F5733), 'Balance still to pay', money(0)),
+              if (!_cash && _tipValue > 0) ...[
+                const SizedBox(height: 6),
+                _box(const Color(0xFFE8EEFB), Brand.navy, 'Charge on card machine (with tip)', money(_applied + _tipValue)),
+              ],
+              const SizedBox(height: 8),
               Wrap(
                 spacing: 8,
                 runSpacing: 8,
@@ -204,24 +216,27 @@ class _PaymentDialogState extends State<_PaymentDialog> {
                   ),
                 ],
               ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: _tip,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                onChanged: (_) => setState(() {}),
-                decoration: InputDecoration(
-                    labelText: 'Tip (optional)',
-                    prefixText: 'R ',
-                    isDense: true,
-                    helperText: _cash ? 'Kept out of the cash received' : 'Added on top of the card amount'),
-              ),
-              const SizedBox(height: 14),
-              if (!_cash)
-                _box(const Color(0xFFE8EEFB), Brand.navy, 'Charge on card machine', money(_applied + _tipValue)),
-              if (_cash && !part) _box(const Color(0xFFE3F3EA), const Color(0xFF0F5733), 'Change to give', money(_change)),
-              if (part) ...[
-                if (!_cash) const SizedBox(height: 8),
-                _box(const Color(0xFFFFF4D6), const Color(0xFF7A4B00), 'Left to pay after this', money(_remaining)),
+              if (!_showTip)
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                      onPressed: () => setState(() => _showTip = true),
+                      icon: const Icon(Icons.add, size: 16),
+                      label: const Text('Add a tip')),
+                )
+              else ...[
+                const SizedBox(height: 8),
+                TextField(
+                  controller: _tip,
+                  autofocus: true,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  onChanged: (_) => setState(() {}),
+                  decoration: InputDecoration(
+                      labelText: 'Tip',
+                      prefixText: 'R ',
+                      isDense: true,
+                      helperText: _cash ? 'Kept out of the cash received' : 'Added on top of the card amount'),
+                ),
               ],
             ],
           ),
@@ -232,7 +247,7 @@ class _PaymentDialogState extends State<_PaymentDialog> {
         FilledButton(
           onPressed: _valid ? _confirm : null,
           child: Text(part
-              ? 'Take ${money(_applied)} ${_cash ? 'cash' : 'card'}, then the rest'
+              ? 'Take ${money(_applied)} ${_cash ? 'cash' : 'card'}, then pay ${money(_remaining)}'
               : (_cash ? 'Record cash payment' : 'Record card payment')),
         ),
       ],
@@ -240,13 +255,13 @@ class _PaymentDialogState extends State<_PaymentDialog> {
   }
 
   Widget _box(Color bg, Color fg, String label, String value) => Container(
-        padding: const EdgeInsets.all(14),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
         decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(12)),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             Text(label, style: TextStyle(fontWeight: FontWeight.w700, color: fg)),
-            Text(value, style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800, color: fg)),
+            Text(value, style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: fg)),
           ],
         ),
       );
