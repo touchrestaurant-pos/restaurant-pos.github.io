@@ -349,10 +349,18 @@ class _LevelsTabState extends State<_LevelsTab> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => StatefulBuilder(builder: (ctx, set) {
+        double? parseNum(String t) => double.tryParse(t.trim().replaceAll(',', '.'));
+        final minBad = min.text.trim().isNotEmpty && parseNum(min.text) == null;
+        final costBad = cost.text.trim().isNotEmpty && parseNum(cost.text) == null;
+        final packBad = packFactor.text.trim().isNotEmpty && parseNum(packFactor.text) == null;
+        final unitBad = unit.text.trim().contains(RegExp(r'[0-9]'));
         final valid = name.text.trim().isNotEmpty &&
             category.text.trim().isNotEmpty &&
             unit.text.trim().isNotEmpty &&
-            double.tryParse(min.text.replaceAll(',', '.')) != null;
+            !unitBad &&
+            parseNum(min.text) != null &&
+            !costBad &&
+            !packBad;
         return AlertDialog(
           title: Text(item == null ? 'Add stock item' : 'Edit ${item['name']}'),
           content: SizedBox(
@@ -373,19 +381,28 @@ class _LevelsTabState extends State<_LevelsTab> {
                   ),
                 ),
                 const SizedBox(height: 8),
-                TextField(controller: unit, onChanged: (_) => set(() {}), decoration: const InputDecoration(labelText: 'Unit (kg, pc, l, pack)')),
+                TextField(controller: unit, onChanged: (_) => set(() {}),
+                    decoration: InputDecoration(
+                        labelText: 'Unit (kg, g, pc, l, ml)',
+                        errorText: unitBad ? 'Letters only, for example kg or g. Put the amount in the other boxes.' : null)),
                 const SizedBox(height: 8),
                 TextField(
                     controller: min,
                     keyboardType: const TextInputType.numberWithOptions(decimal: true),
                     onChanged: (_) => set(() {}),
-                    decoration: const InputDecoration(labelText: 'Minimum level (reorder when at or below)')),
+                    decoration: InputDecoration(
+                        labelText: 'Minimum level (reorder when at or below)',
+                        suffixText: unit.text,
+                        errorText: minBad || min.text.trim().isEmpty ? 'Type a number only, for example 5 (the unit is set above)' : null)),
                 if (item == null) ...[
                   const SizedBox(height: 8),
                   TextField(
                       controller: cost,
                       keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                      decoration: const InputDecoration(labelText: 'Cost per unit, excl. VAT (optional)')),
+                      onChanged: (_) => set(() {}),
+                      decoration: InputDecoration(
+                          labelText: 'Cost per unit, excl. VAT (optional)',
+                          errorText: costBad ? 'Numbers only, for example 0.024' : null)),
                 ],
                 const SizedBox(height: 8),
                 DropdownButtonFormField<String>(
@@ -422,7 +439,11 @@ class _LevelsTabState extends State<_LevelsTab> {
                     child: TextField(
                         controller: packFactor,
                         keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                        decoration: InputDecoration(labelText: 'Units in one', suffixText: unit.text)),
+                        onChanged: (_) => set(() {}),
+                        decoration: InputDecoration(
+                            labelText: 'Units in one',
+                            suffixText: unit.text,
+                            errorText: packBad ? 'Numbers only' : null)),
                   ),
                 ]),
                 const Text('For example a case of 24 cans: when receiving stock you can enter cases.',
