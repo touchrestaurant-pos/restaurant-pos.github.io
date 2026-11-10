@@ -28,6 +28,9 @@ class _CashierScreenState extends State<CashierScreen> {
   final List<CartLine> _cart = [];
   String _type = 'eat_in';
   final _table = TextEditingController();
+  final _custName = TextEditingController();
+  final _custPhone = TextEditingController();
+  final _custAddress = TextEditingController();
   String _view = 'menu'; // menu, tables
   double _discount = 0;
   String _discountReason = '';
@@ -45,6 +48,9 @@ class _CashierScreenState extends State<CashierScreen> {
   @override
   void dispose() {
     _table.dispose();
+    _custName.dispose();
+    _custPhone.dispose();
+    _custAddress.dispose();
     super.dispose();
   }
 
@@ -81,6 +87,9 @@ class _CashierScreenState extends State<CashierScreen> {
   void _clear() => setState(() {
         _cart.clear();
         _table.clear();
+        _custName.clear();
+        _custPhone.clear();
+        _custAddress.clear();
         _discount = 0;
         _discountReason = '';
         _editingOrderId = null;
@@ -89,7 +98,11 @@ class _CashierScreenState extends State<CashierScreen> {
   Future<void> _editNotes(CartLine line, VoidCallback refresh) async {
     final result = await showDialog<Map<String, dynamic>>(
       context: context,
-      builder: (_) => _NotesDialog(initial: line.notes, pickedIds: line.modifierIds, item: line.name),
+      builder: (_) => _NotesDialog(
+          initial: line.notes,
+          pickedIds: line.modifierIds,
+          item: line.name,
+          categoryId: LocalStore.row('products', line.productId)?['category_id'] as String?),
     );
     if (result != null) {
       line.notes = result['notes'] as String;
@@ -125,6 +138,10 @@ class _CashierScreenState extends State<CashierScreen> {
 
   Future<void> _submit({required bool payNow}) async {
     if (_cart.isEmpty) return;
+    if (_type == 'delivery' && (_custAddress.text.trim().isEmpty || _custPhone.text.trim().isEmpty)) {
+      _toast('A delivery needs the customer\'s phone number and address.');
+      return;
+    }
     final t = _totals;
     var payments = <Map<String, dynamic>>[];
     if (payNow && t.total > 0) {
@@ -137,6 +154,9 @@ class _CashierScreenState extends State<CashierScreen> {
       lines: lines,
       type: _type,
       table: _type == 'eat_in' ? _table.text : null,
+      customerName: _custName.text,
+      customerPhone: _type == 'eat_in' ? null : _custPhone.text,
+      deliveryAddress: _type == 'delivery' ? _custAddress.text : null,
       discount: _discount,
       discountReason: _discountReason,
       payments: payments,
@@ -155,14 +175,17 @@ class _CashierScreenState extends State<CashierScreen> {
     }
     if (change > 0) msg.write(' · change ${money(change)}');
     _toast(msg.toString(), orderId: id);
-    if (balance <= 0.005 && payments.isNotEmpty) maybeAutoPrint(id);
+    if (balance <= 0.005 && payments.isNotEmpty) await maybeAutoPrint(id);
+    maybePrintKitchenTicket(id);
   }
 
   Future<void> _submitAdded() async {
     final id = _editingOrderId;
     if (id == null || _cart.isEmpty) return;
     final ref = _editingOrder?['order_ref'];
+    final before = OrderRepo.itemsFor(id).map((i) => i['id']).toSet();
     await OrderRepo.addItems(id, List<CartLine>.from(_cart));
+    maybePrintKitchenTicket(id, onlyItemIds: OrderRepo.itemsFor(id).map((i) => i['id']).where((x) => !before.contains(x)).toSet());
     SyncService.instance.syncNow();
     if (!mounted) return;
     _clear();
@@ -462,6 +485,28 @@ class _CashierScreenState extends State<CashierScreen> {
                     keyboardType: TextInputType.number,
                     decoration: const InputDecoration(labelText: 'Table number', isDense: true),
                   ),
+                ],
+                if (_type != 'eat_in') ...[
+                  const SizedBox(height: 8),
+                  Row(children: [
+                    Expanded(
+                        child: TextField(
+                            controller: _custName,
+                            textCapitalization: TextCapitalization.words,
+                            decoration: const InputDecoration(labelText: 'Customer name', isDense: true))),
+                    const SizedBox(width: 8),
+                    Expanded(
+                        child: TextField(
+                            controller: _custPhone,
+                            keyboardType: TextInputType.phone,
+                            decoration: const InputDecoration(labelText: 'Phone', isDense: true))),
+                  ]),
+                ],
+                if (_type == 'delivery') ...[
+                  const SizedBox(height: 8),
+                  TextField(
+                      controller: _custAddress,
+                      decoration: const InputDecoration(labelText: 'Delivery address', isDense: true)),
                 ],
               ],
             ],
@@ -864,7 +909,8 @@ class _DiscountDialogState extends State<_DiscountDialog> {
 }
 
 class _NotesDialog extends StatefulWidget {
-  const _NotesDialog({required this.initial, required this.pickedIds, required this.item});
+  const _NotesDialog({required this.initial, required this.pickedIds, required this.item, this.categoryId});
+  final String? categoryId;
   final String initial;
   final List<String> pickedIds;
   final String item;
@@ -900,7 +946,11 @@ class _NotesDialogState extends State<_NotesDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final mods = Catalog.modifiers();
+    // Requests limited to certain categories only show for items in them.
+    final mods = Catalog.modifiers().where((m) {
+      final cats = (m['category_ids'] as List?) ?? const [];
+      return cats.isEmpty || cats.contains(widget.categoryId) || _picked.contains(m['id']);
+    }).toList();
     return AlertDialog(
       title: Text('Special request · ${widget.item}'),
       content: SizedBox(
@@ -993,6 +1043,30 @@ class _OpenOrdersDialogState extends State<_OpenOrdersDialog> {
     }
   }
 
+  /// Move an order to another table. Moving two orders to the same table joins their bills on the Tables view.
+  Future<void> _moveTable(Map<String, dynamic> o) async {
+    final c = TextEditingController(text: '${o['table_no'] ?? ''}');
+    final t = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Move order #${o['order_ref']}'),
+        content: TextField(
+            controller: c,
+            autofocus: true,
+            keyboardType: TextInputType.number,
+            decoration: const InputDecoration(labelText: 'New table number')),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, c.text.trim()), child: const Text('Move')),
+        ],
+      ),
+    );
+    if (t == null || t.isEmpty) return;
+    await LocalStore.patch('orders', o['id'], {'table_no': t});
+    SyncService.instance.syncNow();
+    if (mounted) Navigator.pop(context);
+  }
+
   Future<void> _items(Map<String, dynamic> o) async {
     await showDialog<void>(context: context, builder: (_) => _OrderItemsDialog(orderId: o['id'] as String));
     if (mounted) setState(() {});
@@ -1051,6 +1125,8 @@ class _OpenOrdersDialogState extends State<_OpenOrdersDialog> {
                           child: const Text('Add items'),
                         ),
                         OutlinedButton(onPressed: () => _items(o), child: const Text('Remove items')),
+                        if (o['order_type'] == 'eat_in')
+                          OutlinedButton(onPressed: () => _moveTable(o), child: const Text('Move table')),
                         TextButton(onPressed: () => showReceiptDialog(context, id), child: const Text('Bill')),
                         if (_isManager && paid <= 0)
                           TextButton(

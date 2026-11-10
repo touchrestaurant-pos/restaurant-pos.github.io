@@ -328,6 +328,9 @@ class _KitchenScreenState extends State<KitchenScreen> {
                       Text(where,
                           style: TextStyle(
                               color: headText, fontSize: 13, fontWeight: FontWeight.w600)),
+                      if ('${o['customer_name'] ?? ''}'.trim().isNotEmpty)
+                        Text('${o['customer_name']}',
+                            style: TextStyle(color: headText, fontSize: 13, fontWeight: FontWeight.w800)),
                     ],
                   ),
                   Text(mmss(elapsed),
@@ -493,12 +496,17 @@ class _KitchenScreenState extends State<KitchenScreen> {
                           ),
                           child: Row(
                             children: [
-                              Text('#${o['order_ref']}',
+                              Text(
+                                  '#${o['order_ref']}${'${o['customer_name'] ?? ''}'.trim().isEmpty ? '' : ' · ${o['customer_name']}'}',
                                   style: const TextStyle(
                                       color: Colors.white,
                                       fontWeight: FontWeight.w800,
                                       fontSize: 18)),
-                              const SizedBox(width: 12),
+                              IconButton(
+                                tooltip: 'Send back to the kitchen (marked ready by mistake)',
+                                icon: const Icon(Icons.undo, color: _soft, size: 20),
+                                onPressed: () => _setStatus(o['id'] as String, 'in_progress'),
+                              ),
                               FilledButton(
                                 style: FilledButton.styleFrom(
                                     minimumSize: const Size(0, 40),

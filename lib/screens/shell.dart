@@ -7,7 +7,9 @@ import '../widgets/change_password_dialog.dart';
 import '../widgets/sync_chip.dart';
 import 'cashier_screen.dart';
 import 'dashboard_screen.dart';
+import 'finance_screen.dart';
 import 'kitchen_screen.dart';
+import '../data/local_store.dart';
 import '../data/sync_service.dart';
 import 'reports_screen.dart';
 import 'cashup_screen.dart';
@@ -58,10 +60,11 @@ class _ShellState extends State<Shell> {
     const menu = _Tab('Menu', Icons.restaurant_menu, _menu, 'Stock & menu');
     const stock = _Tab('Stock', Icons.inventory_2_outlined, _stock, 'Stock & menu');
     const reports = _Tab('Reports', Icons.bar_chart, _reports, 'Money');
+    const finance = _Tab('Finance', Icons.account_balance_outlined, _finance, 'Money');
     const settings = _Tab('Settings', Icons.settings_outlined, _settings, 'Admin');
     switch (role) {
       case 'cashier':
-        return const [order, orders, dash];
+        return const [order, orders];
       case 'kitchen':
         return const [kitchen];
       case 'stock':
@@ -69,7 +72,7 @@ class _ShellState extends State<Shell> {
       case 'supervisor':
         return const [order, kitchen, orders, cashup, dash];
       case 'admin':
-        return const [order, orders, kitchen, dash, reports, cashup, stock, menu, requests, staff, settings];
+        return const [order, orders, kitchen, dash, reports, cashup, finance, stock, menu, requests, staff, settings];
       default:
         return const [dash];
     }
@@ -85,6 +88,7 @@ class _ShellState extends State<Shell> {
   static Widget _menu() => const MenuScreen();
   static Widget _stock() => const StockScreen();
   static Widget _reports() => const ReportsScreen();
+  static Widget _finance() => const FinanceScreen();
   static Widget _settings() => const SettingsScreen();
 
   @override
@@ -149,7 +153,22 @@ class _ShellState extends State<Shell> {
         children: [
           if (showNav && wide)
             _SideMenu(tabs: tabs, index: _index, onTap: (i) => setState(() => _index = i)),
-          Expanded(child: tabs[_index].build()),
+          Expanded(
+            child: Column(children: [
+              // Sales that have waited long are at risk if this device is lost or its browser data is cleared.
+              if ((LocalStore.oldestPendingAge ?? Duration.zero) > const Duration(minutes: 10))
+                Container(
+                  width: double.infinity,
+                  color: const Color(0xFFFDE7EA),
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                  child: Text(
+                      '${LocalStore.pendingCount} changes on this device have not reached the server for '
+                      '${LocalStore.oldestPendingAge!.inMinutes} minutes. Check the internet. Do not clear the browser data or sign out until this is gone.',
+                      style: const TextStyle(color: Brand.red, fontWeight: FontWeight.w700)),
+                ),
+              Expanded(child: tabs[_index].build()),
+            ]),
+          ),
         ],
       ),
       drawer: showNav && !wide && tabs.length > 5

@@ -5,7 +5,9 @@ import '../data/local_store.dart';
 import '../data/repo.dart';
 import '../data/sync_service.dart';
 import '../theme.dart';
+import '../auth/auth_service.dart';
 import 'purchase_orders.dart';
+import 'stocktake_tab.dart';
 
 SupabaseClient get _db => Supabase.instance.client;
 
@@ -63,7 +65,7 @@ class StockScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return DefaultTabController(
-      length: 4,
+      length: 5,
       child: Column(children: const [
         Padding(
           padding: EdgeInsets.fromLTRB(20, 16, 20, 0),
@@ -78,10 +80,10 @@ class StockScreen extends StatelessWidget {
           tabAlignment: TabAlignment.start,
           labelColor: Brand.navy,
           indicatorColor: Brand.gold,
-          tabs: [Tab(text: 'Stock levels'), Tab(text: 'Purchase orders'), Tab(text: 'Receive stock (GRV)'), Tab(text: 'Suppliers')],
+          tabs: [Tab(text: 'Stock levels'), Tab(text: 'Purchase orders'), Tab(text: 'Receive stock (GRV)'), Tab(text: 'Stock-take'), Tab(text: 'Suppliers')],
         ),
         Expanded(
-          child: TabBarView(children: [_LevelsTab(), PurchaseOrdersTab(), _GrvTab(), _SuppliersTab()]),
+          child: TabBarView(children: [_LevelsTab(), PurchaseOrdersTab(), _GrvTab(), StocktakeTab(), _SuppliersTab()]),
         ),
       ]),
     );
@@ -338,6 +340,7 @@ class _LevelsTabState extends State<_LevelsTab> {
     final min = TextEditingController(text: item == null ? '' : _qty(item['min_level']));
     final cost = TextEditingController(text: item == null ? '' : '${n(item['avg_cost'])}');
     String? supplier = item?['supplier_id'] as String?;
+    String vatType = '${item?['vat_type'] ?? 'standard'}';
     bool active = item?['active'] != false;
     final packUnit = TextEditingController(text: '${item?['purchase_unit'] ?? ''}');
     final packFactor = TextEditingController(
@@ -384,6 +387,19 @@ class _LevelsTabState extends State<_LevelsTab> {
                       keyboardType: const TextInputType.numberWithOptions(decimal: true),
                       decoration: const InputDecoration(labelText: 'Cost per unit, excl. VAT (optional)')),
                 ],
+                const SizedBox(height: 8),
+                DropdownButtonFormField<String>(
+                  initialValue: vatType,
+                  decoration: const InputDecoration(
+                      labelText: 'VAT when you buy it',
+                      helperText: 'Fresh vegetables and fruit, milk, eggs, rice, flour and cooking oil are zero-rated'),
+                  items: const [
+                    DropdownMenuItem(value: 'standard', child: Text('Standard rated (15%)')),
+                    DropdownMenuItem(value: 'zero', child: Text('Zero-rated (0%)')),
+                    DropdownMenuItem(value: 'exempt', child: Text('No VAT (supplier not a VAT vendor)')),
+                  ],
+                  onChanged: (v) => set(() => vatType = v ?? 'standard'),
+                ),
                 const SizedBox(height: 8),
                 DropdownButtonFormField<String?>(
                   initialValue: supplier,
@@ -437,6 +453,7 @@ class _LevelsTabState extends State<_LevelsTab> {
       'unit': unit.text.trim(),
       'min_level': double.parse(min.text.replaceAll(',', '.')),
       'supplier_id': supplier,
+      'vat_type': vatType,
       'active': active,
       'purchase_unit': packUnit.text.trim().isEmpty ? null : packUnit.text.trim(),
       'purchase_factor': (double.tryParse(packFactor.text.replaceAll(',', '.')) ?? 1) > 0
@@ -501,7 +518,7 @@ class _GrvTab extends StatelessWidget {
                           if (g['status'] == 'posted') Text(money(n(g['total'])), style: const TextStyle(fontWeight: FontWeight.w700)),
                           const SizedBox(width: 12),
                           Chip(
-                            label: Text(g['status'] == 'posted' ? 'Posted' : 'Draft'),
+                            label: Text(const {'posted': 'Posted', 'reversed': 'Reversed'}[g['status']] ?? 'Draft'),
                             backgroundColor: g['status'] == 'posted'
                                 ? const Color(0xFFDDF3E6)
                                 : const Color(0xFFFFF1CC),
@@ -548,7 +565,9 @@ class GrvEditor extends StatefulWidget {
 }
 
 class GrvEditorState extends State<GrvEditor> {
-  late final bool _posted = widget.grv?['status'] == 'posted';
+  /// Posted and reversed deliveries can no longer be edited.
+  late final bool _posted = widget.grv != null && widget.grv!['status'] != 'draft';
+  bool get _reversed => widget.grv?['status'] == 'reversed';
   String? _supplier;
   final _note = TextEditingController();
   DateTime _on = DateTime.now();
@@ -723,6 +742,39 @@ class GrvEditorState extends State<GrvEditor> {
     }
   }
 
+  /// Undo a posted delivery (wrong supplier, returned goods): takes the stock back out.
+  Future<void> _reverse() async {
+    final c = TextEditingController();
+    final reason = await showDialog<String>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, set) => AlertDialog(
+          title: const Text('Reverse this delivery?'),
+          content: SizedBox(
+            width: 400,
+            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Text('The received stock is taken back out and the delivery no longer counts as a purchase. Use it for a delivery captured by mistake or returned to the supplier.'),
+              const SizedBox(height: 10),
+              TextField(controller: c, autofocus: true, onChanged: (_) => set(() {}), decoration: const InputDecoration(labelText: 'Reason (required)')),
+            ]),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+            FilledButton(
+                style: FilledButton.styleFrom(backgroundColor: Brand.red, foregroundColor: Colors.white),
+                onPressed: c.text.trim().isEmpty ? null : () => Navigator.pop(ctx, c.text.trim()),
+                child: const Text('Reverse')),
+          ],
+        ),
+      ),
+    );
+    if (reason == null || !mounted) return;
+    final ok = await _online(context, () async {
+      await _db.rpc('reverse_grv', params: {'p_grv_id': widget.grv!['id'], 'p_reason': reason});
+    });
+    if (ok && mounted) Navigator.pop(context);
+  }
+
   Future<void> _delete() async {
     final go = await showDialog<bool>(
       context: context,
@@ -747,14 +799,23 @@ class GrvEditorState extends State<GrvEditor> {
   @override
   Widget build(BuildContext context) {
     final rate = vatRate();
-    final vat = round2(_subtotal * rate / 100);
+    // VAT only on standard-rated items (fresh produce, milk and so on carry none).
+    final vat = round2(_lines
+            .where((l) => (_item(l.itemId)?['vat_type'] ?? 'standard') == 'standard')
+            .fold<double>(0, (s, l) => s + l.total) *
+        rate /
+        100);
     final isNew = widget.grv == null;
     return Scaffold(
       appBar: AppBar(
-        title: Text(isNew ? 'Receive stock' : '${widget.grv!['grv_no']}${_posted ? ' (posted)' : ' (draft)'}'),
+        title: Text(isNew ? 'Receive stock' : '${widget.grv!['grv_no']}${_reversed ? ' (reversed)' : (_posted ? ' (posted)' : ' (draft)')}'),
         actions: [
           if (!isNew && !_posted)
             IconButton(onPressed: _busy ? null : _delete, icon: const Icon(Icons.delete_outline), tooltip: 'Delete draft'),
+          if (_posted && !_reversed && const ['admin', 'supervisor'].contains(AuthService.instance.role))
+            TextButton(
+                onPressed: _busy ? null : _reverse,
+                child: const Text('Reverse delivery', style: TextStyle(color: Colors.white))),
         ],
       ),
       body: ListView(padding: const EdgeInsets.all(20), children: [

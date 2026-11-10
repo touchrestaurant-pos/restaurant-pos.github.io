@@ -37,10 +37,11 @@ class _ReportsScreenState extends State<ReportsScreen> {
   static const _periods = {
     'today': 'Today',
     'yesterday': 'Yesterday',
+    'thisweek': 'This week',
     'week': 'Last 7 days',
     'month': 'This month',
+    'lastmonth': 'Last month',
     'days30': 'Last 30 days',
-    'custom': 'Custom',
   };
 
   @override
@@ -57,6 +58,10 @@ class _ReportsScreenState extends State<ReportsScreen> {
     switch (_period) {
       case 'yesterday':
         return DateTimeRange(start: DateTime(now.year, now.month, now.day - 1), end: today);
+      case 'thisweek':
+        return DateTimeRange(start: DateTime(now.year, now.month, now.day - (now.weekday - 1)), end: tomorrow);
+      case 'lastmonth':
+        return DateTimeRange(start: DateTime(now.year, now.month - 1, 1), end: DateTime(now.year, now.month, 1));
       case 'week':
         return DateTimeRange(start: DateTime(now.year, now.month, now.day - 6), end: tomorrow);
       case 'month':
@@ -73,17 +78,32 @@ class _ReportsScreenState extends State<ReportsScreen> {
     }
   }
 
-  Future<void> _pickCustom() async {
+  /// Pick the first or last day of the range. The other end is kept (and moved
+  /// only if the range would otherwise run backwards).
+  Future<void> _pickDay({required bool from}) async {
     final now = DateTime.now();
-    final picked = await showDateRangePicker(
+    final cur = _range();
+    final curFrom = cur.start;
+    final curTo = cur.end.subtract(const Duration(days: 1));
+    final picked = await showDatePicker(
       context: context,
-      firstDate: DateTime(now.year - 3),
+      firstDate: DateTime(now.year - 5),
       lastDate: now,
-      initialDateRange: _custom,
+      initialDate: from ? curFrom : curTo,
+      helpText: from ? 'From date' : 'To date',
     );
     if (picked == null) return;
+    var start = from ? picked : curFrom;
+    var end = from ? curTo : picked;
+    if (end.isBefore(start)) {
+      if (from) {
+        end = start;
+      } else {
+        start = end;
+      }
+    }
     setState(() {
-      _custom = picked;
+      _custom = DateTimeRange(start: start, end: end);
       _period = 'custom';
     });
     _load();
@@ -250,31 +270,28 @@ class _ReportsScreenState extends State<ReportsScreen> {
                   ],
                 ),
                 const SizedBox(height: 8),
-                SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: Row(
-                    children: [
-                      for (final e in _periods.entries)
-                        Padding(
-                          padding: const EdgeInsets.only(right: 8),
-                          child: ChoiceChip(
-                            label: Text(e.key == 'custom' && _custom != null
-                                ? '${_dateText(_custom!.start)} to ${_dateText(_custom!.end)}'
-                                : e.value),
-                            selected: _period == e.key,
-                            onSelected: (_) {
-                              if (e.key == 'custom') {
-                                _pickCustom();
-                              } else {
-                                setState(() => _period = e.key);
-                                _load();
-                              }
-                            },
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
+                Builder(builder: (context) {
+                  final cur = _range();
+                  final last = cur.end.subtract(const Duration(days: 1));
+                  Widget dateBox(String label, DateTime d, bool from) => OutlinedButton.icon(
+                        onPressed: () => _pickDay(from: from),
+                        icon: const Icon(Icons.calendar_today, size: 16),
+                        label: Text('$label  ${_dateText(d)}', style: const TextStyle(fontWeight: FontWeight.w700)),
+                      );
+                  return Wrap(spacing: 8, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
+                    dateBox('From', cur.start, true),
+                    dateBox('To', last, false),
+                    for (final e in _periods.entries)
+                      ChoiceChip(
+                        label: Text(e.value),
+                        selected: _period == e.key,
+                        onSelected: (_) {
+                          setState(() => _period = e.key);
+                          _load();
+                        },
+                      ),
+                  ]);
+                }),
                 if (range != null)
                   Padding(
                     padding: const EdgeInsets.only(top: 6),

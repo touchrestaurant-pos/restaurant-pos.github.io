@@ -21,6 +21,7 @@ class SpecialRequestsScreen extends StatelessWidget {
       'price_delta': result['price_delta'],
       'stock_item_id': result['stock_item_id'],
       'stock_qty': result['stock_qty'],
+      'category_ids': result['category_ids'],
     };
     if (existing == null) {
       await LocalStore.insert('modifiers', {'id': LocalStore.newId(), ...fields, 'active': true});
@@ -172,6 +173,9 @@ class _EditDialogState extends State<_EditDialog> {
   late final TextEditingController _qty;
   String? _stockId;
   bool _saves = false;
+  late final Set<String> _cats = {
+    for (final c in (widget.existing?['category_ids'] as List?) ?? const []) '$c'
+  };
   String? _error;
 
   @override
@@ -222,6 +226,7 @@ class _EditDialogState extends State<_EditDialog> {
       'price_delta': round2(extra),
       'stock_item_id': _stockId,
       'stock_qty': _stockId == null ? 0 : (_saves ? -qty : qty),
+      'category_ids': _cats.toList(),
     });
   }
 
@@ -283,6 +288,22 @@ class _EditDialogState extends State<_EditDialog> {
                     helperText: _saves ? 'For example "No onion" saves 0.02 kg onion' : 'For example "Extra cheese" uses 1 slice'),
               ),
             ],
+            const SizedBox(height: 14),
+            const Align(
+                alignment: Alignment.centerLeft,
+                child: Text('Show for (none ticked = every item)', style: TextStyle(fontWeight: FontWeight.w700))),
+            const SizedBox(height: 6),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Wrap(spacing: 6, runSpacing: 6, children: [
+                for (final c in (LocalStore.rows('categories')..sort((a, b) => n(a['sort_order']).compareTo(n(b['sort_order'])))))
+                  FilterChip(
+                    label: Text('${c['name']}'),
+                    selected: _cats.contains(c['id']),
+                    onSelected: (v) => setState(() => v ? _cats.add(c['id'] as String) : _cats.remove(c['id'])),
+                  ),
+              ]),
+            ),
             if (_error != null) ...[
               const SizedBox(height: 12),
               Text(_error!, style: const TextStyle(color: Brand.red)),

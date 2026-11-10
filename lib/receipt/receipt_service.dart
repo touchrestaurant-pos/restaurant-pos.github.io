@@ -23,12 +23,16 @@ class ReceiptData {
     required this.payments,
     required this.company,
     this.refunded = 0,
+    this.creditNotes = const [],
   });
   final Map<String, dynamic> order;
   final List<Map<String, dynamic>> items;
   final List<Map<String, dynamic>> payments;
   final Map<String, dynamic> company;
   final double refunded;
+
+  /// Numbers of the credit notes issued for refunds on this order.
+  final List<int> creditNotes;
 
   String get ref => '${order['order_ref']}';
   bool get paid => order['paid'] == true;
@@ -62,6 +66,21 @@ class ReceiptData {
     final table = '${order['table_no'] ?? ''}'.trim();
     return table.isEmpty ? base : '$base, table $table';
   }
+
+  /// From rows fetched from the server (orders older than the device keeps).
+  factory ReceiptData.fromServer(Map<String, dynamic> row) {
+    final items = ((row['order_items'] as List?) ?? const [])
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .where((i) => i['voided'] != true)
+        .toList()
+      ..sort((a, b) => '${a['created_at']}'.compareTo('${b['created_at']}'));
+    final pays = ((row['payments'] as List?) ?? const []).map((e) => Map<String, dynamic>.from(e as Map)).toList()
+      ..sort((a, b) => '${a['created_at']}'.compareTo('${b['created_at']}'));
+    return ReceiptData(order: row, items: items, payments: pays, company: companyRow() ?? const {});
+  }
+
+  ReceiptData withRefunds(double refunded, List<int> notes) => ReceiptData(
+      order: order, items: items, payments: payments, company: company, refunded: refunded, creditNotes: notes);
 
   static ReceiptData? forOrder(String orderId, {double refunded = 0}) {
     final order = LocalStore.row('orders', orderId);
@@ -172,6 +191,12 @@ List<RLine> receiptLines(ReceiptData r) {
       const RLine.center('Invoice number given when synced', size: 7),
     RLine.center('Order #${r.ref} · ${_when.format(r.when)}', size: 8),
     if (r.typeText.isNotEmpty) RLine.center(r.typeText, size: 8),
+    if ('${r.order['customer_name'] ?? ''}'.trim().isNotEmpty)
+      RLine.center(
+          'Customer: ${r.order['customer_name']}${'${r.order['customer_phone'] ?? ''}'.trim().isEmpty ? '' : ' · ${r.order['customer_phone']}'}',
+          size: 8),
+    if ('${r.order['delivery_address'] ?? ''}'.trim().isNotEmpty)
+      RLine.center('Deliver to: ${r.order['delivery_address']}', size: 8),
     if (r.cancelled) const RLine.center('CANCELLED', size: 11, bold: true),
     if (!r.paid && !r.cancelled)
       RLine.center(r.paidAmount > 0 ? 'PART PAID' : 'NOT PAID - BILL', size: 11, bold: true),
@@ -196,7 +221,11 @@ List<RLine> receiptLines(ReceiptData r) {
     const RLine.gap(),
     ..._paymentLines(r),
     if (!r.paid && !r.cancelled) RLine.row('STILL TO PAY', money(r.total - r.paidAmount), bold: true, size: 10),
-    if (r.refunded > 0) RLine.row('Refunded', money(r.refunded), bold: true, size: 8),
+    if (r.refunded > 0) ...[
+      RLine.row('Refunded', money(r.refunded), bold: true, size: 8),
+      if (r.creditNotes.isNotEmpty)
+        RLine.row('  Credit note', r.creditNotes.map((c) => 'CN-${'$c'.padLeft(6, '0')}').join(', '), size: 8),
+    ],
     if (footer.isNotEmpty) ...[const RLine.gap(), RLine.center(footer, size: 8)],
   ];
   return lines;
@@ -347,6 +376,75 @@ Future<void> maybeAutoPrint(String orderId) async {
   }
 }
 
+/// Print a ticket for the kitchen after an order is sent (per device).
+bool kitchenTicketOn() => LocalStore.getMeta('kitchen_ticket') == true;
+Future<void> setKitchenTicket(bool v) => LocalStore.setMeta('kitchen_ticket', v);
+
+/// Kitchen ticket: big item names and special requests, no prices.
+Future<Uint8List> kitchenTicketPdf(String orderId, {Set<dynamic>? onlyItemIds}) async {
+  final o = LocalStore.row('orders', orderId) ?? const {};
+  final items = LocalStore.rows('order_items')
+      .where((i) => i['order_id'] == orderId && i['voided'] != true && (onlyItemIds == null || onlyItemIds.contains(i['id'])))
+      .toList()
+    ..sort((a, b) => '${a['created_at']}'.compareTo('${b['created_at']}'));
+  const types = {'eat_in': 'EAT IN', 'take_away': 'TAKE AWAY', 'delivery': 'DELIVERY'};
+  final t = parseTime(o['created_at']) ?? DateTime.now();
+  final doc = pw.Document(title: 'Kitchen ${o['order_ref']}');
+  pw.TextStyle st(double size, {bool bold = true}) =>
+      pw.TextStyle(fontSize: size, fontWeight: bold ? pw.FontWeight.bold : pw.FontWeight.normal);
+  doc.addPage(pw.Page(
+    pageFormat: slipFormat(),
+    build: (ctx) => pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.stretch, children: [
+      pw.Text('#${o['order_ref']}', style: st(22), textAlign: pw.TextAlign.center),
+      pw.Text(
+          '${types[o['order_type']] ?? ''}${o['table_no'] != null ? '  TABLE ${o['table_no']}' : ''}',
+          style: st(13),
+          textAlign: pw.TextAlign.center),
+      if ('${o['customer_name'] ?? ''}'.trim().isNotEmpty)
+        pw.Text('${o['customer_name']}', style: st(11), textAlign: pw.TextAlign.center),
+      pw.Text('${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}${onlyItemIds != null ? '  ** ADDED ITEMS **' : ''}',
+          style: st(10, bold: false), textAlign: pw.TextAlign.center),
+      pw.Divider(thickness: 0.8),
+      for (final i in items) ...[
+        pw.Text('${i['qty']} x ${i['name']}', style: st(14)),
+        if ('${i['notes'] ?? ''}'.trim().isNotEmpty)
+          pw.Padding(
+              padding: const pw.EdgeInsets.only(left: 10, bottom: 2),
+              child: pw.Text('>> ${'${i['notes']}'.trim().toUpperCase()}', style: st(11))),
+        pw.SizedBox(height: 4),
+      ],
+      pw.SizedBox(height: 8),
+    ]),
+  ));
+  return doc.save();
+}
+
+Future<void> maybePrintKitchenTicket(String orderId, {Set<dynamic>? onlyItemIds}) async {
+  if (!kitchenTicketOn()) return;
+  try {
+    final url = LocalStore.getMeta('kitchen_printer_url') as String? ?? LocalStore.getMeta('printer_url') as String?;
+    if (!kIsWeb && url != null) {
+      final ok = await Printing.directPrintPdf(
+        printer: Printer(url: url),
+        name: 'Kitchen-$orderId',
+        format: slipFormat(),
+        usePrinterSettings: false,
+        onLayout: (_) => kitchenTicketPdf(orderId, onlyItemIds: onlyItemIds),
+      );
+      if (ok) return;
+    }
+    await Printing.layoutPdf(
+      name: 'Kitchen ticket',
+      format: slipFormat(),
+      dynamicLayout: false,
+      usePrinterSettings: false,
+      onLayout: (_) => kitchenTicketPdf(orderId, onlyItemIds: onlyItemIds),
+    );
+  } catch (_) {
+    // A printer problem must never stop the till.
+  }
+}
+
 Future<void> downloadReceipt(ReceiptData r) async {
   await Printing.sharePdf(bytes: await receiptPdf(r), filename: 'Receipt-${r.ref}.pdf');
 }
@@ -360,13 +458,16 @@ Future<bool> emailReceipt(ReceiptData r, String to) {
 
 /// Shows the receipt with Print, Download PDF and Email buttons.
 /// Supervisors and admins also get Refund for paid orders.
-Future<void> showReceiptDialog(BuildContext context, String orderId) async {
-  await showDialog<void>(context: context, builder: (_) => _ReceiptDialog(orderId: orderId));
+Future<void> showReceiptDialog(BuildContext context, String orderId, {ReceiptData? data}) async {
+  await showDialog<void>(context: context, builder: (_) => _ReceiptDialog(orderId: orderId, preset: data));
 }
 
 class _ReceiptDialog extends StatefulWidget {
-  const _ReceiptDialog({required this.orderId});
+  const _ReceiptDialog({required this.orderId, this.preset});
   final String orderId;
+
+  /// Set for an older order that was fetched from the server.
+  final ReceiptData? preset;
 
   @override
   State<_ReceiptDialog> createState() => _ReceiptDialogState();
@@ -374,6 +475,7 @@ class _ReceiptDialog extends StatefulWidget {
 
 class _ReceiptDialogState extends State<_ReceiptDialog> {
   double _refunded = 0;
+  List<int> _notes = [];
 
   bool get _canRefund => const ['admin', 'supervisor'].contains(AuthService.instance.role);
 
@@ -388,10 +490,16 @@ class _ReceiptDialogState extends State<_ReceiptDialog> {
     try {
       final rows = await Supabase.instance.client
           .from('refunds')
-          .select('amount')
-          .eq('order_id', widget.orderId);
+          .select('amount, credit_note_no')
+          .eq('order_id', widget.orderId)
+          .order('created_at');
       final sum = rows.fold<double>(0, (s, e) => s + n(e['amount']).toDouble());
-      if (mounted) setState(() => _refunded = sum);
+      if (mounted) {
+        setState(() {
+          _refunded = sum;
+          _notes = [for (final e in rows) if (e['credit_note_no'] != null) n(e['credit_note_no']).toInt()];
+        });
+      }
     } catch (_) {
       // offline: refunds are simply not shown
     }
@@ -517,7 +625,7 @@ class _ReceiptDialogState extends State<_ReceiptDialog> {
         'p_restock': restock && !r.cancelled,
       });
       await _loadRefunds();
-      _say('Refund recorded.');
+      _say(_notes.isEmpty ? 'Refund recorded.' : 'Refund recorded. Credit note CN-${'${_notes.last}'.padLeft(6, '0')}. Print the slip for the customer.');
       await SyncService.instance.syncNow();
     } on PostgrestException catch (e) {
       _say(e.message);
@@ -528,7 +636,7 @@ class _ReceiptDialogState extends State<_ReceiptDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final r = ReceiptData.forOrder(widget.orderId, refunded: _refunded);
+    final r = (widget.preset ?? ReceiptData.forOrder(widget.orderId))?.withRefunds(_refunded, _notes);
     if (r == null) {
       return AlertDialog(
           content: const Text('This order is not stored on this device.'),

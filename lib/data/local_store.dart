@@ -147,6 +147,15 @@ class LocalStore {
 
   static int get pendingCount => _outbox.length;
 
+  /// How long the oldest waiting change has been waiting.
+  static Duration? get oldestPendingAge {
+    if (_outbox.isEmpty) return null;
+    final keys = _outbox.keys.cast<String>().toList()..sort();
+    final micros = int.tryParse(keys.first.split('-').first);
+    if (micros == null) return null;
+    return DateTime.now().difference(DateTime.fromMicrosecondsSinceEpoch(micros));
+  }
+
   static int get failedCount =>
       _outbox.values.where((v) => isFailed(Map<String, dynamic>.from(v as Map))).length;
 

@@ -49,7 +49,8 @@ class DashboardScreen extends StatelessWidget {
               spacing: 16,
               runSpacing: 16,
               children: [
-                _Stat(value: money(todaySales), label: 'SALES TODAY', colour: Brand.gold),
+                if (const ['admin', 'supervisor'].contains(auth.role))
+                  _Stat(value: money(todaySales), label: 'SALES TODAY', colour: Brand.gold),
                 _Stat(value: '$open', label: 'OPEN ORDERS', colour: Brand.red),
                 _Stat(value: '$low', label: 'LOW STOCK', colour: Brand.amber),
                 _Stat(value: '$products', label: 'MENU ITEMS', colour: Brand.green),

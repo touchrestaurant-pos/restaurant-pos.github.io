@@ -1,0 +1,4 @@
+-- 015_financials.sql was applied to the live project in three parts on 2026-11-10
+-- (financials_1_audit_totals_credit_notes, financials_2_day_close_cash_movements,
+-- financials_3_purchases_expenses_stocktake) after grv_status gained the value 'reversed':
+--   alter type public.grv_status add value if not exists 'reversed';

@@ -81,6 +81,12 @@ class SyncService extends ChangeNotifier {
     'payments',
   ];
 
+  static const _busyTables = {'orders', 'order_items', 'payments', 'stock_items', 'modifiers', 'products'};
+  DateTime? _lastFull;
+
+  /// Forces every table to refresh on the next sync (after an admin change).
+  void refreshAll() => _lastFull = null;
+
   bool online = true;
   bool syncing = false;
   bool _again = false;
@@ -119,9 +125,13 @@ class SyncService extends ChangeNotifier {
     notifyListeners();
     try {
       final pushed = await pushOutbox(_backend);
+      // Orders and stock change all day; the menu, staff and suppliers rarely do,
+      // so those are refreshed every 5 minutes (or straight away after a manual sync).
+      final full = _lastFull == null || DateTime.now().difference(_lastFull!) > const Duration(minutes: 5);
       for (final t in pullTables) {
-        await _pull(t);
+        if (full || _busyTables.contains(t)) await _pull(t);
       }
+      if (full) _lastFull = DateTime.now();
       _subscribe();
       lastSync = DateTime.now();
       lastError = pushed.lastError;

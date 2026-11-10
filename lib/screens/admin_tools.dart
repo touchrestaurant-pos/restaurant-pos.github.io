@@ -143,6 +143,30 @@ class _AdminToolsState extends State<AdminTools> {
     if (mounted) setState(() => _busy = false);
   }
 
+  List<Map<String, dynamic>> _audit = [];
+  bool _auditLoaded = false;
+
+  Future<void> _loadAudit() async {
+    try {
+      final rows = await _db.from('audit_log').select().order('at', ascending: false).limit(100);
+      _audit = rows.map((e) => Map<String, dynamic>.from(e)).toList();
+    } catch (_) {
+      _say('The change history needs an internet connection.');
+    }
+    if (mounted) setState(() => _auditLoaded = true);
+  }
+
+  /// "price: 49.9 -> 54.9" for edits, the name for new or deleted rows.
+  String _auditText(Map<String, dynamic> a) {
+    final c = a['changes'];
+    if (c is! Map) return '${a['row_id'] ?? ''}';
+    if (a['action'] == 'update') {
+      return c.entries.map((e) => e.value is List ? '${e.key}: ${e.value[0]} -> ${e.value[1]}' : '${e.key}').join(', ');
+    }
+    if (a['action'] == 'price_differs') return '${c['item']} charged ${c['charged']}, menu price ${c['menu_price']}';
+    return '${c['name'] ?? c['full_name'] ?? a['row_id'] ?? ''}';
+  }
+
   Future<void> _loadErrors() async {
     try {
       final rows = await _db
@@ -188,6 +212,16 @@ class _AdminToolsState extends State<AdminTools> {
           value: autoPrintOn(),
           onChanged: (v) async {
             await setAutoPrint(v);
+            setState(() {});
+          },
+        ),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('Print a kitchen ticket when an order is sent'),
+          subtitle: const Text('Item names and special requests in large print, no prices'),
+          value: kitchenTicketOn(),
+          onChanged: (v) async {
+            await setKitchenTicket(v);
             setState(() {});
           },
         ),
@@ -245,6 +279,25 @@ class _AdminToolsState extends State<AdminTools> {
               label: const Text('Clear test sales before going live')),
         ]),
         if (_status != null) Padding(padding: const EdgeInsets.only(top: 8), child: Text(_status!)),
+      ]),
+      card('Change history', [
+        const Text('Who changed prices, recipes, stock items, staff and settings, and prices charged that differ from the menu.',
+            style: TextStyle(color: Brand.muted)),
+        const SizedBox(height: 8),
+        if (!_auditLoaded)
+          OutlinedButton(onPressed: _loadAudit, child: const Text('Show the last 100 changes'))
+        else if (_audit.isEmpty)
+          const Text('No changes recorded yet.')
+        else
+          for (final a in _audit)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 3),
+              child: Text(
+                  '${'${a['at']}'.replaceFirst('T', ' ').split('.').first} · '
+                  '${LocalStore.row('staff_profiles', a['user_id'])?['full_name'] ?? 'System'} · '
+                  '${a['table_name']} ${a['action']}: ${_auditText(a)}',
+                  style: const TextStyle(fontSize: 12)),
+            ),
       ]),
       card('Problems reported by the app', [
         const Text('Errors from every till, so problems can be fixed even when nobody reports them.',

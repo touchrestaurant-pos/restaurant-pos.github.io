@@ -1,8 +1,13 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../auth/auth_service.dart';
 import '../data/local_store.dart';
 import '../data/repo.dart';
+import '../receipt/download_file.dart';
 import '../theme.dart';
 
 SupabaseClient get _db => Supabase.instance.client;
@@ -110,6 +115,187 @@ class _CashUpScreenState extends State<CashUpScreen> {
     if (mounted) setState(() => _saving = false);
   }
 
+  static const _kinds = {
+    'drop': 'Cash drop (safe / bank)',
+    'payout': 'Pay-out (petty cash)',
+    'tip_payout': 'Tips paid to staff',
+    'float_in': 'Cash added to drawer',
+  };
+
+  void _say(String m) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(m)));
+
+  Future<void> _addMovement() async {
+    String kind = 'drop';
+    final amount = TextEditingController();
+    final note = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(builder: (ctx, set) {
+        final a = double.tryParse(amount.text.replaceAll(',', '.')) ?? 0;
+        return AlertDialog(
+          title: const Text('Cash in or out'),
+          content: SizedBox(
+            width: 400,
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              DropdownButtonFormField<String>(
+                initialValue: kind,
+                decoration: const InputDecoration(labelText: 'What happened'),
+                items: [for (final e in _kinds.entries) DropdownMenuItem(value: e.key, child: Text(e.value))],
+                onChanged: (v) => set(() => kind = v ?? 'drop'),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                  controller: amount,
+                  autofocus: true,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  onChanged: (_) => set(() {}),
+                  decoration: const InputDecoration(labelText: 'Amount', prefixText: 'R ')),
+              const SizedBox(height: 8),
+              TextField(
+                  controller: note,
+                  onChanged: (_) => set(() {}),
+                  decoration: const InputDecoration(labelText: 'Note (required), for example "bread from Spar"')),
+            ]),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+            FilledButton(
+                onPressed: a > 0 && note.text.trim().isNotEmpty ? () => Navigator.pop(ctx, true) : null,
+                child: const Text('Save')),
+          ],
+        );
+      }),
+    );
+    if (ok != true) return;
+    try {
+      await _db.from('cash_movements').insert({
+        'business_date': _d(_day),
+        'kind': kind,
+        'amount': double.parse(amount.text.replaceAll(',', '.')),
+        'note': note.text.trim(),
+        'staff_id': _staff,
+      });
+      await _load();
+    } on PostgrestException catch (e) {
+      _say(e.message);
+    } catch (_) {
+      _say('This needs an internet connection.');
+    }
+  }
+
+  Future<void> _closeDay() async {
+    final unpaid = LocalStore.rows('orders').where((o) {
+      final t = parseTime(o['created_at']);
+      return o['paid'] != true && o['status'] != 'void' && t != null && _d(t) == _d(_day);
+    }).length;
+    final go = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Close ${_d(_day)}?'),
+        content: Text([
+          if (_sum?['done'] == null) 'No cash-up has been saved for this day yet.',
+          if (unpaid > 0) '$unpaid order${unpaid == 1 ? ' is' : 's are'} still unpaid.',
+          'Closing freezes the figures and locks cash-ups and cash movements. Only an admin can reopen the day.',
+        ].join('\n\n')),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Not yet')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Close the day')),
+        ],
+      ),
+    );
+    if (go != true) return;
+    try {
+      await _db.rpc('close_day', params: {'p_date': _d(_day)});
+      await _load();
+      await _showClose();
+    } on PostgrestException catch (e) {
+      _say(e.message);
+    } catch (_) {
+      _say('Closing the day needs an internet connection.');
+    }
+  }
+
+  Future<void> _reopen() async {
+    try {
+      await _db.rpc('reopen_day', params: {'p_date': _d(_day)});
+      await _load();
+    } on PostgrestException catch (e) {
+      _say(e.message);
+    } catch (_) {
+      _say('This needs an internet connection.');
+    }
+  }
+
+  /// The frozen figures, next to the live ones so late arrivals stand out.
+  Future<void> _showClose() async {
+    try {
+      final row = await _db.from('day_closes').select().eq('business_date', _d(_day)).single();
+      final sum = Map<String, dynamic>.from(row['summary'] as Map);
+      final sm = Map<String, dynamic>.from((sum['summary'] as Map?) ?? const {});
+      final cash = Map<String, dynamic>.from((sum['cash'] as Map?) ?? const {});
+      final liveCash = n(_sum?['cash_sales']) + n(_sum?['card_sales']);
+      final frozenCash = n(cash['cash_sales']) + n(cash['card_sales']);
+      final lines = <List<String>>[
+        ['Paid orders', '${sm['orders'] ?? 0}'],
+        ['Sales incl. VAT', money(n(sm['gross']))],
+        ['Discounts given', money(n(sm['discounts']))],
+        ['Refunds', money(n(sm['refunds']))],
+        ['Sales after refunds', money(n(sm['after_refunds']))],
+        ['VAT', money(n(sm['vat']))],
+        ['Sales excl. VAT', money(n(sm['net']))],
+        ['Tips', money(n(sm['tips']))],
+        ['Cash payments', money(n(cash['cash_sales']))],
+        ['Card payments', money(n(cash['card_sales']))],
+        ['Cash refunds', money(n(cash['cash_refunds']))],
+        ['Cash taken out', money(n(cash['cash_out']))],
+        for (final c in (sum['cash_ups'] as List? ?? const []))
+          ['Cash-up variance', money(n((c as Map)['variance']))],
+        ['Unpaid orders at close', '${(sum['unpaid'] as Map?)?['orders'] ?? 0}'],
+        ['Cancelled orders', '${(sum['voided'] as Map?)?['orders'] ?? 0}'],
+      ];
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text('Day-end summary · ${_d(_day)}'),
+          content: SizedBox(
+            width: 420,
+            child: SingleChildScrollView(
+              child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('Closed ${'${row['closed_at']}'.replaceFirst('T', ' ').split('.').first} (UTC)',
+                    style: const TextStyle(color: Brand.muted, fontSize: 12)),
+                const SizedBox(height: 8),
+                for (final l in lines) _row(l[0], l[1]),
+                if ((liveCash - frozenCash).abs() > 0.005)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 10),
+                    child: Text(
+                        '${money(liveCash - frozenCash)} in payments arrived after the day was closed (a till synced late). The reports include it.',
+                        style: const TextStyle(color: Brand.amber, fontWeight: FontWeight.w700)),
+                  ),
+              ]),
+            ),
+          ),
+          actions: [
+            TextButton(
+                onPressed: () async {
+                  await downloadBytes(
+                      'Day-end_${_d(_day)}.csv',
+                      Uint8List.fromList(utf8.encode('\uFEFFDay-end summary,${_d(_day)}\n${lines.map((l) => '"${l[0]}","${l[1]}"').join('\n')}\n')),
+                      'text/csv');
+                },
+                child: const Text('Download')),
+            FilledButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close')),
+          ],
+        ),
+      );
+    } on PostgrestException catch (e) {
+      _say(e.message);
+    } catch (_) {
+      _say('This needs an internet connection.');
+    }
+  }
+
   Widget _row(String l, String r, {bool bold = false, Color? color}) => Padding(
         padding: const EdgeInsets.symmetric(vertical: 4),
         child: Row(children: [
@@ -124,7 +310,11 @@ class _CashUpScreenState extends State<CashUpScreen> {
     final cashSales = n(s?['cash_sales']).toDouble();
     final cashRefunds = n(s?['cash_refunds']).toDouble();
     final cashTips = n(s?['cash_tips']).toDouble();
-    final expected = _num(_float) + cashSales + cashTips - cashRefunds;
+    final cashOut = n(s?['cash_out']).toDouble();
+    final cashIn = n(s?['cash_in']).toDouble();
+    final closed = s?['closed'] == true;
+    final moves = ((s?['movements'] as List?) ?? const []).map((e) => Map<String, dynamic>.from(e as Map)).toList();
+    final expected = _num(_float) + cashSales + cashTips - cashRefunds - cashOut + cashIn;
     final staffList = LocalStore.rows('staff_profiles')
         .where((p) => p['active'] != false && const ['cashier', 'supervisor', 'admin'].contains(p['role']))
         .toList()
@@ -204,6 +394,8 @@ class _CashUpScreenState extends State<CashUpScreen> {
                 _row('Cash sales (${s['cash_count']} payments)', money(cashSales)),
                 _row('Cash tips (pay out to staff)', money(cashTips)),
                 _row('Cash refunds', '-${money(cashRefunds)}'),
+                if (cashOut > 0) _row('Taken out (drops, pay-outs)', '-${money(cashOut)}'),
+                if (cashIn > 0) _row('Added to the drawer', money(cashIn)),
                 const Divider(),
                 _row('Expected in drawer', money(expected), bold: true),
                 const SizedBox(height: 10),
@@ -226,7 +418,7 @@ class _CashUpScreenState extends State<CashUpScreen> {
                 TextField(controller: _notes, decoration: const InputDecoration(labelText: 'Notes (optional)')),
                 const SizedBox(height: 12),
                 FilledButton(
-                    onPressed: counted == null || _saving ? null : () => _save(expected, variance),
+                    onPressed: counted == null || _saving || closed ? null : () => _save(expected, variance),
                     child: Text(_saving ? 'Saving...' : 'Save cash-up')),
               ]),
             ),
@@ -260,6 +452,68 @@ class _CashUpScreenState extends State<CashUpScreen> {
           return Column(children: [cash, card]);
         }),
       ],
+      if (s != null)
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Row(children: [
+                const Expanded(
+                    child: Text('Cash in and out of the drawer', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700))),
+                if (!closed)
+                  OutlinedButton.icon(onPressed: _addMovement, icon: const Icon(Icons.add), label: const Text('Record')),
+              ]),
+              const Text('Cash taken to the safe or bank, petty-cash pay-outs, tips paid to staff, or change added.',
+                  style: TextStyle(color: Brand.muted, fontSize: 12)),
+              if (moves.isEmpty) const Padding(padding: EdgeInsets.only(top: 8), child: Text('Nothing recorded for this day.')),
+              for (final m in moves)
+                ListTile(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  title: Text('${_kinds[m['kind']] ?? m['kind']} · ${m['note']}'),
+                  subtitle: Text('${m['by']}'),
+                  trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                    Text('${m['kind'] == 'float_in' ? '+' : '-'}${money(n(m['amount']))}',
+                        style: const TextStyle(fontWeight: FontWeight.w700)),
+                    if (!closed)
+                      IconButton(
+                          tooltip: 'Remove',
+                          icon: const Icon(Icons.close, size: 18),
+                          onPressed: () async {
+                            try {
+                              await _db.from('cash_movements').delete().eq('id', m['id']);
+                              _load();
+                            } catch (_) {}
+                          }),
+                  ]),
+                ),
+            ]),
+          ),
+        ),
+      if (s != null && _staff == null)
+        Card(
+          color: closed ? const Color(0xFFDDF3E6) : null,
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(closed ? 'This day is closed' : 'Close the day',
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+              const SizedBox(height: 4),
+              Text(
+                  closed
+                      ? 'The figures were frozen at closing. Cash-ups and cash movements for this day are locked.'
+                      : 'Do this after the cash-up. It freezes a copy of the day\'s sales, payments, VAT and cash figures, and locks cash-ups and cash movements for the day.',
+                  style: const TextStyle(color: Brand.muted)),
+              const SizedBox(height: 10),
+              Wrap(spacing: 10, runSpacing: 10, children: [
+                if (!closed) FilledButton.icon(onPressed: _closeDay, icon: const Icon(Icons.lock), label: const Text('Close the day')),
+                if (closed) OutlinedButton.icon(onPressed: _showClose, icon: const Icon(Icons.summarize), label: const Text('Day-end summary')),
+                if (closed && AuthService.instance.role == 'admin')
+                  TextButton(onPressed: _reopen, child: const Text('Reopen (admin)')),
+              ]),
+            ]),
+          ),
+        ),
       if (s != null && _staff == null && ((s['by_staff'] as List?) ?? const []).isNotEmpty)
         Card(
           child: Padding(

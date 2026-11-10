@@ -24,5 +24,5 @@ class AppConfig {
   );
 
   /// Shown under Settings. Raise it with every release.
-  static const appVersion = '1.2.0';
+  static const appVersion = '1.3.0';
 }
