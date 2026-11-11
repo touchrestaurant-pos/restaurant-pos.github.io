@@ -310,12 +310,18 @@ Future<Uint8List> receiptPdf(ReceiptData r) async {
   final doc = pw.Document(title: 'Receipt ${r.ref}', author: r.companyName);
   doc.addPage(pw.Page(
     pageFormat: slipFormat(),
-    build: (ctx) => pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.stretch, children: [
-      if (logo != null) pw.Center(child: pw.Image(logo, width: 46, height: 46, fit: pw.BoxFit.contain)),
-      if (logo != null) pw.SizedBox(height: 4),
-      for (final l in receiptLines(r)) draw(l),
-      pw.SizedBox(height: 6),
-    ]),
+    build: (ctx) => pw.Container(
+      // A very short slip (one item, no notes) can print on its side on some
+      // slip printers, whose driver rotates anything much shorter than the
+      // roll's fixed page length. A minimum length avoids that.
+      constraints: const pw.BoxConstraints(minHeight: 70 * PdfPageFormat.mm),
+      child: pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.stretch, children: [
+        if (logo != null) pw.Center(child: pw.Image(logo, width: 46, height: 46, fit: pw.BoxFit.contain)),
+        if (logo != null) pw.SizedBox(height: 4),
+        for (final l in receiptLines(r)) draw(l),
+        pw.SizedBox(height: 6),
+      ]),
+    ),
   ));
   return doc.save();
 }
@@ -394,27 +400,33 @@ Future<Uint8List> kitchenTicketPdf(String orderId, {Set<dynamic>? onlyItemIds}) 
       pw.TextStyle(fontSize: size, fontWeight: bold ? pw.FontWeight.bold : pw.FontWeight.normal);
   doc.addPage(pw.Page(
     pageFormat: slipFormat(),
-    build: (ctx) => pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.stretch, children: [
-      pw.Text('#${o['order_ref']}', style: st(22), textAlign: pw.TextAlign.center),
-      pw.Text(
-          '${types[o['order_type']] ?? ''}${o['table_no'] != null ? '  TABLE ${o['table_no']}' : ''}',
-          style: st(13),
-          textAlign: pw.TextAlign.center),
-      if ('${o['customer_name'] ?? ''}'.trim().isNotEmpty)
-        pw.Text('${o['customer_name']}', style: st(11), textAlign: pw.TextAlign.center),
-      pw.Text('${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}${onlyItemIds != null ? '  ** ADDED ITEMS **' : ''}',
-          style: st(10, bold: false), textAlign: pw.TextAlign.center),
-      pw.Divider(thickness: 0.8),
-      for (final i in items) ...[
-        pw.Text('${i['qty']} x ${i['name']}', style: st(14)),
-        if ('${i['notes'] ?? ''}'.trim().isNotEmpty)
-          pw.Padding(
-              padding: const pw.EdgeInsets.only(left: 10, bottom: 2),
-              child: pw.Text('>> ${'${i['notes']}'.trim().toUpperCase()}', style: st(11))),
-        pw.SizedBox(height: 4),
-      ],
-      pw.SizedBox(height: 8),
-    ]),
+    build: (ctx) => pw.Container(
+      // A short order (1-2 items) can print on its side on some slip
+      // printers, whose driver rotates anything much shorter than the roll's
+      // fixed page length. A minimum length avoids that.
+      constraints: const pw.BoxConstraints(minHeight: 70 * PdfPageFormat.mm),
+      child: pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.stretch, children: [
+        pw.Text('#${o['order_ref']}', style: st(22), textAlign: pw.TextAlign.center),
+        pw.Text(
+            '${types[o['order_type']] ?? ''}${o['table_no'] != null ? '  TABLE ${o['table_no']}' : ''}',
+            style: st(13),
+            textAlign: pw.TextAlign.center),
+        if ('${o['customer_name'] ?? ''}'.trim().isNotEmpty)
+          pw.Text('${o['customer_name']}', style: st(11), textAlign: pw.TextAlign.center),
+        pw.Text('${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}${onlyItemIds != null ? '  ** ADDED ITEMS **' : ''}',
+            style: st(10, bold: false), textAlign: pw.TextAlign.center),
+        pw.Divider(thickness: 0.8),
+        for (final i in items) ...[
+          pw.Text('${i['qty']} x ${i['name']}', style: st(14)),
+          if ('${i['notes'] ?? ''}'.trim().isNotEmpty)
+            pw.Padding(
+                padding: const pw.EdgeInsets.only(left: 10, bottom: 2),
+                child: pw.Text('>> ${'${i['notes']}'.trim().toUpperCase()}', style: st(11))),
+          pw.SizedBox(height: 4),
+        ],
+        pw.SizedBox(height: 8),
+      ]),
+    ),
   ));
   return doc.save();
 }
