@@ -185,9 +185,24 @@ List<RLine> _vatSplit(ReceiptData r) {
   ];
 }
 
+/// What the customer's slip says under an item: the special requests they chose (such as "Extra sprinkles").
+/// The free-text note typed for the kitchen stays on the kitchen slip unless the owner switches it on.
+String _customerNote(Map<String, dynamic> item, bool showAll) {
+  final all = '${item['notes'] ?? ''}'.trim();
+  if (all.isEmpty || showAll) return all;
+  final ids = ((item['modifier_ids'] as List?) ?? const []).map((x) => '$x').toSet();
+  if (ids.isEmpty) return '';
+  return LocalStore.rows('modifiers')
+      .where((m) => ids.contains('${m['id']}'))
+      .map((m) => '${m['name']}')
+      .join(' · ');
+}
+
 List<RLine> receiptLines(ReceiptData r) {
   final c = r.company;
-  final taxInvoice = r.vatNumber.isNotEmpty;
+  // The supplier's VAT number must appear on a tax invoice, so hiding it makes this a plain receipt.
+  final taxInvoice = r.vatNumber.isNotEmpty && c['show_vat_on_slip'] != false;
+  final showNotes = c['show_notes_on_slip'] == true;
   final footer = '${c['receipt_footer'] ?? ''}'.trim();
   final lines = <RLine>[
     RLine.center(r.companyName, size: 13, bold: true),
@@ -216,7 +231,7 @@ List<RLine> receiptLines(ReceiptData r) {
     for (final i in r.items) ...[
       RLine.row('${i['qty']} x ${i['name']}${i['vat_type'] == 'zero' ? ' (Z)' : (i['vat_type'] == 'exempt' ? ' (E)' : '')}',
           _lineTotal(i)),
-      if ('${i['notes'] ?? ''}'.trim().isNotEmpty) RLine.note('${i['notes']}'.trim()),
+      if (_customerNote(i, showNotes).isNotEmpty) RLine.note(_customerNote(i, showNotes)),
     ],
     const RLine.divider(),
     if (r.discount > 0) ...[

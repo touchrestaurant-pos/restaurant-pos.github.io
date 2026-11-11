@@ -35,6 +35,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late final TextEditingController _vat;
   bool _cash = true;
   bool _card = true;
+  bool _showVat = true;
+  bool _showNotes = false;
   bool _busy = false;
   String? _message;
   bool _messageIsError = false;
@@ -52,6 +54,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (_c['timezone']!.text.isEmpty) _c['timezone']!.text = 'Africa/Johannesburg';
     _cash = row['accept_cash'] != false;
     _card = row['accept_card_manual'] != false;
+    _showVat = row['show_vat_on_slip'] != false;
+    _showNotes = row['show_notes_on_slip'] == true;
   }
 
   @override
@@ -90,6 +94,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
       'vat_rate': rate,
       'accept_cash': _cash,
       'accept_card_manual': _card,
+      'show_vat_on_slip': _showVat,
+      'show_notes_on_slip': _showNotes,
       'table_count': tables,
     };
     if (companyRow()?['id'] == 1) {
@@ -250,6 +256,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   _field('address', 'Address'),
                   const SizedBox(height: 14),
                   _field('receipt_footer', 'Receipt footer message'),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Show our VAT number on the customer slip'),
+                    subtitle: const Text('Off: the slip says RECEIPT, not TAX INVOICE. A tax invoice must show your VAT number.'),
+                    value: _showVat,
+                    onChanged: (v) => setState(() => _showVat = v),
+                  ),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Show kitchen notes on the customer slip'),
+                    subtitle: const Text('Off: the slip shows only the special requests chosen for the item. The kitchen slip always shows everything.'),
+                    value: _showNotes,
+                    onChanged: (v) => setState(() => _showNotes = v),
+                  ),
                 ],
               );
             }),
