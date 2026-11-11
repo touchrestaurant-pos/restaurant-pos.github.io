@@ -1288,26 +1288,31 @@ class _CancelDialogState extends State<_CancelDialog> {
     try {
       await SyncService.instance.syncNow(); // make sure the order and payments are on the server
       final db = Supabase.instance.client;
-      final method = OrderRepo.paymentsFor(id).isNotEmpty
-          ? '${OrderRepo.paymentsFor(id).first['method']}'
+      final pays = OrderRepo.paymentsFor(id);
+      final acctPaid = round2(pays.where((p) => p['method'] == 'account').fold<double>(0, (s, p) => s + n(p['amount']).toDouble()));
+      final otherMethod = pays.where((p) => p['method'] != 'account').isNotEmpty
+          ? '${pays.firstWhere((p) => p['method'] != 'account')['method']}'
           : 'cash';
-      final already = await db.from('refunds').select('amount').eq('order_id', id);
+      final already = await db.from('refunds').select('amount,method').eq('order_id', id);
       final refunded = already.fold<double>(0, (s, r) => s + n(r['amount']).toDouble());
+      final acctBack = already.where((r) => r['method'] == 'account').fold<double>(0, (s, r) => s + n(r['amount']).toDouble());
       final toRefund = round2(paidAmount - refunded);
-      if (toRefund > 0.005) {
-        await db.rpc('issue_refund', params: {
-          'p_order_id': id,
-          'p_amount': toRefund,
-          'p_method': method,
-          'p_reason': 'Order cancelled: $reason',
-          'p_restock': false,
-        });
-      }
+      final toAccount = round2((acctPaid - acctBack).clamp(0, toRefund));
+      final toCustomer = round2(toRefund - toAccount);
+      Future<void> refund(double amount, String method) => db.rpc('issue_refund', params: {
+            'p_order_id': id,
+            'p_amount': amount,
+            'p_method': method,
+            'p_reason': 'Order cancelled: $reason',
+            'p_restock': false,
+          });
+      if (toAccount > 0.005) await refund(toAccount, 'account');
+      if (toCustomer > 0.005) await refund(toCustomer, otherMethod);
       await db.from('orders').update({'status': 'void', 'void_reason': text}).eq('id', id);
       await SyncService.instance.syncNow();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text('Order #${o['order_ref']} cancelled. Give the customer ${money(toRefund > 0 ? toRefund : 0)} back.')));
+            content: Text('Order #${o['order_ref']} cancelled. ${toAccount > 0.005 ? '${money(toAccount)} was credited to the customer account. ' : ''}Give the customer ${money(toCustomer > 0 ? toCustomer : 0)} back.')));
       }
     } on PostgrestException catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));

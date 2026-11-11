@@ -126,7 +126,7 @@ class RLine {
   final bool bold;
 }
 
-String _method(dynamic m) => m == 'cash' ? 'Cash' : 'Card';
+String _method(dynamic m) => m == 'cash' ? 'Cash' : (m == 'account' ? 'On account' : 'Card');
 String _lineTotal(Map<String, dynamic> i) => money(n(i['qty']) * n(i['unit_price']));
 final _when = DateFormat('yyyy-MM-dd HH:mm');
 String _rate() => vatRate().toStringAsFixed(vatRate() == vatRate().roundToDouble() ? 0 : 1);
@@ -141,6 +141,18 @@ List<RLine> _paymentLines(ReceiptData r) {
   if (split) out.add(const RLine.row('PAYMENTS', '', size: 8, bold: true));
   for (final p in pays) {
     out.add(RLine.row(split ? '  ${_method(p['method'])}' : 'Paid by ${_method(p['method'])}', money(n(p['amount'])), size: 8));
+  }
+  final onAcct = pays.where((p) => p['method'] == 'account').toList();
+  if (onAcct.isNotEmpty) {
+    final first = onAcct.first;
+    out.add(const RLine.divider());
+    out.add(RLine.row('Charged to account', money(onAcct.fold<double>(0, (s, p) => s + n(p['amount']).toDouble())), size: 8, bold: true));
+    out.add(RLine.note('${first['account_name'] ?? ''} (${first['account_no'] ?? ''})'));
+    if ('${first['account_vat_no'] ?? ''}'.isNotEmpty) out.add(RLine.note('Customer VAT no: ${first['account_vat_no']}'));
+    if ('${first['account_address'] ?? ''}'.isNotEmpty) out.add(RLine.note('${first['account_address']}'));
+    out.add(const RLine.note('Amount owing is payable on the terms of your account.'));
+    out.add(const RLine.gap());
+    out.add(const RLine.note('Customer signature: ____________________'));
   }
   if (split) out.add(RLine.row('Total paid', money(r.paidAmount), size: 8, bold: true));
   if (r.tips > 0) out.add(RLine.row('Tip (thank you)', money(r.tips), size: 8));
@@ -567,6 +579,7 @@ class _ReceiptDialogState extends State<_ReceiptDialog> {
     }
     final amount = TextEditingController(text: remaining.toStringAsFixed(2));
     final reason = TextEditingController();
+    final hasAcct = r.payments.any((p) => p['method'] == 'account');
     String method = r.payments.isNotEmpty ? '${r.payments.first['method']}' : 'cash';
     bool restock = !r.cancelled;
     final ok = await showDialog<bool>(
@@ -592,6 +605,7 @@ class _ReceiptDialogState extends State<_ReceiptDialog> {
                 segments: const [
                   ButtonSegment(value: 'cash', label: Text('Cash back')),
                   ButtonSegment(value: 'card_manual', label: Text('Back to card')),
+                  if (hasAcct) ButtonSegment(value: 'account', label: Text('Account credit')),
                 ],
                 selected: {method},
                 onSelectionChanged: (v) => set(() => method = v.first),

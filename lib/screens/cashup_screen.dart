@@ -246,6 +246,7 @@ class _CashUpScreenState extends State<CashUpScreen> {
         ['Tips', money(n(sm['tips']))],
         ['Cash payments', money(n(cash['cash_sales']))],
         ['Card payments', money(n(cash['card_sales']))],
+        if (n(cash['account_sales']) > 0) ['Sold on account', money(n(cash['account_sales']))],
         ['Cash refunds', money(n(cash['cash_refunds']))],
         ['Cash taken out', money(n(cash['cash_out']))],
         for (final c in (sum['cash_ups'] as List? ?? const []))
@@ -312,9 +313,11 @@ class _CashUpScreenState extends State<CashUpScreen> {
     final cashTips = n(s?['cash_tips']).toDouble();
     final cashOut = n(s?['cash_out']).toDouble();
     final cashIn = n(s?['cash_in']).toDouble();
+    final acctCash = n(s?['acct_cash']).toDouble();
+    final acctSales = n(s?['account_sales']).toDouble();
     final closed = s?['closed'] == true;
     final moves = ((s?['movements'] as List?) ?? const []).map((e) => Map<String, dynamic>.from(e as Map)).toList();
-    final expected = _num(_float) + cashSales + cashTips - cashRefunds - cashOut + cashIn;
+    final expected = _num(_float) + cashSales + cashTips - cashRefunds - cashOut + cashIn + acctCash;
     final staffList = LocalStore.rows('staff_profiles')
         .where((p) => p['active'] != false && const ['cashier', 'supervisor', 'admin'].contains(p['role']))
         .toList()
@@ -396,6 +399,7 @@ class _CashUpScreenState extends State<CashUpScreen> {
                 _row('Cash refunds', '-${money(cashRefunds)}'),
                 if (cashOut > 0) _row('Taken out (drops, pay-outs)', '-${money(cashOut)}'),
                 if (cashIn > 0) _row('Added to the drawer', money(cashIn)),
+                if (acctCash > 0) _row('Cash received on accounts', money(acctCash)),
                 const Divider(),
                 _row('Expected in drawer', money(expected), bold: true),
                 const SizedBox(height: 10),
@@ -433,6 +437,12 @@ class _CashUpScreenState extends State<CashUpScreen> {
                 _row('Card slips to match', '${s['card_slips']}'),
                 _row('Card refunds', '-${money(n(s['card_refunds']))}'),
                 _row('Card tips (pay out to staff)', money(n(s['card_tips']))),
+                if (acctSales > 0 || n(s?['acct_card']) > 0 || n(s?['acct_eft']) > 0) ...[
+                  const Divider(),
+                  _row('Sold on account today (not paid yet)', money(acctSales)),
+                  if (n(s?['acct_card']) > 0) _row('Account payments by card', money(n(s?['acct_card']))),
+                  if (n(s?['acct_eft']) > 0) _row('Account payments by EFT', money(n(s?['acct_eft']))),
+                ],
                 const Divider(),
                 _row('Card total to match against the machine',
                     money(n(s['card_sales']) + n(s['card_tips']) - n(s['card_refunds'])), bold: true),

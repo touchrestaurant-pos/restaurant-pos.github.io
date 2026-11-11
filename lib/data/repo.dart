@@ -318,6 +318,13 @@ class OrderRepo {
         if (p['card_brand'] != null) 'card_brand': p['card_brand'],
         if (p['card_last4'] != null) 'card_last4': p['card_last4'],
         if (p['slip_no'] != null) 'slip_no': p['slip_no'],
+        if (p['account_id'] != null) ...{
+          'account_id': p['account_id'],
+          'account_no': p['account_no'],
+          'account_name': p['account_name'],
+          'account_vat_no': p['account_vat_no'],
+          'account_address': p['account_address'],
+        },
         'created_by': _me,
         'created_at': _nowIso(),
       });

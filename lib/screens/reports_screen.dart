@@ -505,7 +505,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
           title: 'Payment methods',
           slices: [
             for (final p in _list('payments'))
-              ChartPoint(p['method'] == 'cash' ? 'Cash' : 'Card', n(p['amount']).toDouble())
+              ChartPoint(p['method'] == 'cash' ? 'Cash' : (p['method'] == 'account' ? 'On account' : 'Card'), n(p['amount']).toDouble())
           ],
           format: (v) => money(v),
         );
@@ -545,7 +545,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
           'Payments received',
           _table(['Method', 'Payments', 'Amount'], [
             for (final p in _list('payments'))
-              [p['method'] == 'cash' ? 'Cash' : 'Card', '${p['count']}', money(n(p['amount']))]
+              [p['method'] == 'cash' ? 'Cash' : (p['method'] == 'account' ? 'On account' : 'Card'), '${p['count']}', money(n(p['amount']))]
           ], right: {1, 2})),
       _section(
           'Sales by day',
@@ -977,7 +977,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
                   '#${r['ref']}',
                   when(r['at']),
                   money(n(r['amount'])),
-                  r['method'] == 'cash' ? 'Cash' : 'Card',
+                  r['method'] == 'cash' ? 'Cash' : (r['method'] == 'account' ? 'Account credit' : 'Card'),
                   '${r['reason'] ?? ''}',
                 ]
             ], right: {2}),

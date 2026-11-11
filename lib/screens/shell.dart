@@ -5,6 +5,7 @@ import '../theme.dart';
 import '../widgets/brand_mark.dart';
 import '../widgets/change_password_dialog.dart';
 import '../widgets/sync_chip.dart';
+import 'accounts_screen.dart';
 import 'cashier_screen.dart';
 import 'dashboard_screen.dart';
 import 'finance_screen.dart';
@@ -61,6 +62,7 @@ class _ShellState extends State<Shell> {
     const stock = _Tab('Stock', Icons.inventory_2_outlined, _stock, 'Stock & menu');
     const reports = _Tab('Reports', Icons.bar_chart, _reports, 'Money');
     const finance = _Tab('Finance', Icons.account_balance_outlined, _finance, 'Money');
+    const accounts = _Tab('Accounts', Icons.account_balance_wallet, _accounts, 'Money');
     const settings = _Tab('Settings', Icons.settings_outlined, _settings, 'Admin');
     switch (role) {
       case 'cashier':
@@ -70,9 +72,9 @@ class _ShellState extends State<Shell> {
       case 'stock':
         return const [stock, dash];
       case 'supervisor':
-        return const [order, kitchen, orders, cashup, dash];
+        return const [order, kitchen, orders, cashup, accounts, dash];
       case 'admin':
-        return const [order, orders, kitchen, dash, reports, cashup, finance, stock, menu, requests, staff, settings];
+        return const [order, orders, kitchen, dash, reports, cashup, accounts, finance, stock, menu, requests, staff, settings];
       default:
         return const [dash];
     }
@@ -89,6 +91,7 @@ class _ShellState extends State<Shell> {
   static Widget _stock() => const StockScreen();
   static Widget _reports() => const ReportsScreen();
   static Widget _finance() => const FinanceScreen();
+  static Widget _accounts() => const AccountsScreen();
   static Widget _settings() => const SettingsScreen();
 
   @override

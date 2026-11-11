@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
+import '../data/accounts_repo.dart';
 import '../data/repo.dart';
 import '../theme.dart';
+import 'account_picker.dart';
 
 /// Payment window: cash, card or both on one screen, with an optional tip.
 ///
@@ -227,6 +229,14 @@ class _PaymentDialogState extends State<_PaymentDialog> {
                       onPressed: () => setState(() => _showTip = true),
                       icon: const Icon(Icons.add, size: 16),
                       label: const Text('Add a tip')),
+                if (AccountsRepo.enabled && widget.due > 0.005)
+                  TextButton.icon(
+                      onPressed: () async {
+                        final a = await pickAccountPayment(context, widget.due);
+                        if (a != null && context.mounted) Navigator.pop(context, [a]);
+                      },
+                      icon: const Icon(Icons.account_balance_wallet_outlined, size: 16),
+                      label: const Text('On account')),
                 const Spacer(),
                 PopupMenuButton<int>(
                   tooltip: 'Split evenly',
