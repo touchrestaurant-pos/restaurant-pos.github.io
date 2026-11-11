@@ -203,6 +203,7 @@ List<RLine> receiptLines(ReceiptData r) {
   // The supplier's VAT number must appear on a tax invoice, so hiding it makes this a plain receipt.
   final taxInvoice = r.vatNumber.isNotEmpty && c['show_vat_on_slip'] != false;
   final showNotes = c['show_notes_on_slip'] == true;
+  final showVat = c['show_vat_on_slip'] != false;
   final footer = '${c['receipt_footer'] ?? ''}'.trim();
   final lines = <RLine>[
     RLine.center(r.companyName, size: 13, bold: true),
@@ -229,7 +230,7 @@ List<RLine> receiptLines(ReceiptData r) {
       RLine.center(r.paidAmount > 0 ? 'PART PAID' : 'NOT PAID - BILL', size: 11, bold: true),
     const RLine.divider(),
     for (final i in r.items) ...[
-      RLine.row('${i['qty']} x ${i['name']}${i['vat_type'] == 'zero' ? ' (Z)' : (i['vat_type'] == 'exempt' ? ' (E)' : '')}',
+      RLine.row('${i['qty']} x ${i['name']}${showVat ? (i['vat_type'] == 'zero' ? ' (Z)' : (i['vat_type'] == 'exempt' ? ' (E)' : '')) : ''}',
           _lineTotal(i)),
       if (_customerNote(i, showNotes).isNotEmpty) RLine.note(_customerNote(i, showNotes)),
     ],
@@ -241,10 +242,12 @@ List<RLine> receiptLines(ReceiptData r) {
           '-${money(r.discount)}',
           size: 8),
     ],
-    RLine.row('TOTAL (incl. VAT)', money(r.total), bold: true, size: 12),
-    RLine.row('Excl. VAT', money(r.subtotal), size: 8),
-    RLine.row('VAT ${_rate()}%', money(r.vat), size: 8),
-    ..._vatSplit(r),
+    RLine.row(showVat ? 'TOTAL (incl. VAT)' : 'TOTAL', money(r.total), bold: true, size: 12),
+    if (showVat) ...[
+      RLine.row('Excl. VAT', money(r.subtotal), size: 8),
+      RLine.row('VAT ${_rate()}%', money(r.vat), size: 8),
+      ..._vatSplit(r),
+    ],
     const RLine.gap(),
     ..._paymentLines(r),
     if (!r.paid && !r.cancelled) RLine.row('STILL TO PAY', money(r.total - r.paidAmount), bold: true, size: 10),
