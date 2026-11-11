@@ -119,7 +119,7 @@ class _AccountPickerState extends State<_AccountPicker> {
                   enabled: a['can_charge'] == true,
                   title: Text('${a['name']}', style: const TextStyle(fontWeight: FontWeight.w700)),
                   subtitle: Text(a['can_charge'] == true
-                      ? '${a['account_no']} · available ${money(n(a['available']))}'
+                      ? '${a['account_no']} · available ${money(n(a['available']))}${n(a['available']) + 0.005 < widget.due ? ' · LIMIT TOO LOW FOR THIS BILL' : ''}'
                       : '${a['account_no']} · ${a['reason'] ?? 'Cannot be charged'}'),
                   trailing: a['can_charge'] == true ? const Icon(Icons.chevron_right) : const Icon(Icons.block, color: Brand.red),
                   onTap: a['can_charge'] == true ? () => _choose(a) : null,
@@ -143,6 +143,17 @@ class _AccountPickerState extends State<_AccountPicker> {
             TextButton(onPressed: () => setState(() => _picked = null), child: const Text('Change')),
           ]),
         ),
+        if (n(picked['available']) + 0.005 < widget.due) ...[
+          const SizedBox(height: 10),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(color: const Color(0xFFFDE7EA), borderRadius: BorderRadius.circular(12), border: Border.all(color: Brand.red)),
+            child: Text(
+                'Over the account limit. This bill is ${money(widget.due)} but ${picked['name']} can only be charged ${money(n(picked['available']))} more. '
+                'Do NOT process this whole order on account. Ask the customer to pay the rest another way, or call the manager.',
+                style: const TextStyle(color: Brand.red, fontWeight: FontWeight.w800)),
+          ),
+        ],
         const SizedBox(height: 12),
         TextField(
           controller: _amount,
