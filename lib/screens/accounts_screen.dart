@@ -313,6 +313,80 @@ class _AccountsScreenState extends State<AccountsScreen> {
     if (wantsPrint == true) await openPdf(await accountReceiptPdf(res, reference: ref.text.trim()), 'Account-receipt');
   }
 
+  Future<void> _refundCredit(Map<String, dynamic> a) async {
+    final credit = -n(a['balance']).toDouble();
+    if (credit <= 0.005) return;
+    final amount = TextEditingController(text: credit.toStringAsFixed(2));
+    final ref = TextEditingController();
+    var method = 'eft';
+    final id = LocalStore.newId();
+    String? err;
+    final res = await showDialog<Map<String, dynamic>>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(builder: (ctx, set) {
+        final v = double.tryParse(amount.text.trim().replaceAll(',', '.')) ?? 0;
+        final bad = v <= 0 ? 'Enter the amount to pay back' : (v > credit + 0.005 ? 'More than the credit (${money(credit)})' : null);
+        return AlertDialog(
+          title: Text('Pay back credit · ${a['name']}'),
+          content: SizedBox(
+            width: 400,
+            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              Text('Credit ${money(credit)}', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 18)),
+              const SizedBox(height: 10),
+              TextField(
+                controller: amount,
+                autofocus: true,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                onChanged: (_) => set(() {}),
+                decoration: InputDecoration(labelText: 'Amount paid back', prefixText: 'R ', errorText: bad),
+              ),
+              const SizedBox(height: 10),
+              SegmentedButton<String>(
+                showSelectedIcon: false,
+                segments: const [
+                  ButtonSegment(value: 'eft', label: Text('EFT')),
+                  ButtonSegment(value: 'cash', label: Text('Cash')),
+                  ButtonSegment(value: 'card', label: Text('Card')),
+                ],
+                selected: {method},
+                onSelectionChanged: (s) => set(() => method = s.first),
+              ),
+              if (method == 'cash')
+                const Padding(
+                    padding: EdgeInsets.only(top: 6),
+                    child: Text('Cash given back comes out of the drawer in today\'s cash-up.', style: TextStyle(color: Brand.muted, fontSize: 12))),
+              const SizedBox(height: 10),
+              TextField(controller: ref, decoration: const InputDecoration(labelText: 'Reference (optional)')),
+              if (err != null)
+                Padding(padding: const EdgeInsets.only(top: 8), child: Text(err!, style: const TextStyle(color: Brand.red, fontWeight: FontWeight.w600))),
+            ]),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+            FilledButton(
+              onPressed: bad != null
+                  ? null
+                  : () async {
+                      try {
+                        final r = await AccountsRepo.refundCredit(
+                            account: '${a['id']}', amount: v, method: method, reference: ref.text.trim(), id: id);
+                        if (ctx.mounted) Navigator.pop(ctx, r);
+                      } catch (e) {
+                        set(() => err = AccountsRepo.message(e));
+                      }
+                    },
+              child: const Text('Pay back'),
+            ),
+          ],
+        );
+      }),
+    );
+    if (res == null) return;
+    _say('Paid back ${money(n(res['amount']))}. Credit left: ${money(-n(res['balance']))}.');
+    await _load();
+  }
+
   Future<void> _writeOff(Map<String, dynamic> a) async {
     final bal = n(a['balance']).toDouble();
     if (bal <= 0.005) return;
@@ -436,7 +510,8 @@ class _AccountsScreenState extends State<AccountsScreen> {
                                     'payment': 'Payment',
                                     'credit_note': 'Credit note',
                                     'writeoff': 'Written off',
-                                    'writeoff_reversal': 'Write-off reversed'
+                                    'writeoff_reversal': 'Write-off reversed',
+                                    'credit_refund': 'Credit paid back'
                                   }[l['kind']] ?? l['kind']} ${l['invoice_no'] ?? l['ref'] ?? ''}')),
                               DataCell(Text(money(n(l['amount'])))),
                               DataCell(Text(money(n(l['running'])))),
@@ -625,11 +700,18 @@ class _AccountsScreenState extends State<AccountsScreen> {
                 if (a['consent_at'] == null) const Chip(label: Text('Not activated'), visualDensity: VisualDensity.compact),
               ]),
             ),
-            Text(money(bal), style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: bal > 0.005 ? Brand.navy : Brand.green)),
+            Text(bal < -0.005 ? 'In credit ${money(-bal)}' : money(bal),
+                style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: bal > 0.005 ? Brand.navy : Brand.green)),
           ]),
           if ('${a['status_reason'] ?? ''}'.isNotEmpty)
             Padding(padding: const EdgeInsets.only(top: 4), child: Text('Reason: ${a['status_reason']}', style: const TextStyle(color: Brand.muted))),
           const SizedBox(height: 6),
+          if (bal < -0.005)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: Text('The customer has ${money(-bal)} paid in advance. It is used first on their next account purchases, or you can pay it back.',
+                  style: const TextStyle(color: Brand.green, fontWeight: FontWeight.w700)),
+            ),
           Text(
               'Limit ${money(n(a['credit_limit']))} · available ${money(n(a['available']))}'
               '${a['max_sale'] != null ? ' · max per sale ${money(n(a['max_sale']))}' : ''} · terms ${a['terms_days']} days'
@@ -652,6 +734,7 @@ class _AccountsScreenState extends State<AccountsScreen> {
               if (status != 'active') OutlinedButton(onPressed: () => _setStatus(a, 'active'), child: const Text('Allow')),
               if (status == 'active') OutlinedButton(onPressed: () => _setStatus(a, 'blocked'), child: const Text('Block')),
               if (status != 'stopped') OutlinedButton(onPressed: () => _setStatus(a, 'stopped'), child: const Text('Stop')),
+              if (bal < -0.005) FilledButton.tonal(onPressed: () => _refundCredit(a), child: const Text('Refund credit')),
               if (bal > 0.005) OutlinedButton(onPressed: () => _writeOff(a), child: const Text('Write off')),
               TextButton(onPressed: () => _reinstate(a), child: const Text('Reinstate write-off')),
             ],

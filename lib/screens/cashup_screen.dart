@@ -314,10 +314,11 @@ class _CashUpScreenState extends State<CashUpScreen> {
     final cashOut = n(s?['cash_out']).toDouble();
     final cashIn = n(s?['cash_in']).toDouble();
     final acctCash = n(s?['acct_cash']).toDouble();
+    final acctBack = n(s?['acct_cash_back']).toDouble();
     final acctSales = n(s?['account_sales']).toDouble();
     final closed = s?['closed'] == true;
     final moves = ((s?['movements'] as List?) ?? const []).map((e) => Map<String, dynamic>.from(e as Map)).toList();
-    final expected = _num(_float) + cashSales + cashTips - cashRefunds - cashOut + cashIn + acctCash;
+    final expected = _num(_float) + cashSales + cashTips - cashRefunds - cashOut + cashIn + acctCash - acctBack;
     final staffList = LocalStore.rows('staff_profiles')
         .where((p) => p['active'] != false && const ['cashier', 'supervisor', 'admin'].contains(p['role']))
         .toList()
@@ -400,6 +401,7 @@ class _CashUpScreenState extends State<CashUpScreen> {
                 if (cashOut > 0) _row('Taken out (drops, pay-outs)', '-${money(cashOut)}'),
                 if (cashIn > 0) _row('Added to the drawer', money(cashIn)),
                 if (acctCash > 0) _row('Cash received on accounts', money(acctCash)),
+                if (acctBack > 0) _row('Account credit paid back in cash', '-${money(acctBack)}'),
                 const Divider(),
                 _row('Expected in drawer', money(expected), bold: true),
                 const SizedBox(height: 10),

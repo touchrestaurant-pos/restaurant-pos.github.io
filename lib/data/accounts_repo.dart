@@ -46,6 +46,22 @@ class AccountsRepo {
         'p_id': id,
       }) as Map);
 
+  /// Pays a customer's credit balance back to them. Admin only.
+  static Future<Map<String, dynamic>> refundCredit({
+    required String account,
+    required double amount,
+    required String method,
+    String? reference,
+    required String id,
+  }) async =>
+      Map<String, dynamic>.from(await _db.rpc('refund_account_credit', params: {
+        'p_account': account,
+        'p_amount': amount,
+        'p_method': method,
+        'p_reference': reference,
+        'p_id': id,
+      }) as Map);
+
   static Future<void> writeOff(String account, double amount, String reason) =>
       _db.rpc('account_writeoff', params: {'p_account': account, 'p_amount': amount, 'p_reason': reason});
 

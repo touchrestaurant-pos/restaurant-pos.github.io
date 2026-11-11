@@ -36,6 +36,7 @@ Future<Uint8List> statementPdf(Map<String, dynamic> st) async {
     'credit_note': 'Credit note',
     'writeoff': 'Written off',
     'writeoff_reversal': 'Write-off reversed',
+    'credit_refund': 'Credit paid back',
   };
   String desc(Map<String, dynamic> l) {
     final k = kinds[l['kind']] ?? '${l['kind']}';
