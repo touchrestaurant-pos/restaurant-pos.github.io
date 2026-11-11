@@ -602,7 +602,7 @@ class _ReceiptDialogState extends State<_ReceiptDialog> {
               const SizedBox(height: 8),
               SegmentedButton<String>(
                 showSelectedIcon: false,
-                segments: const [
+                segments: [
                   ButtonSegment(value: 'cash', label: Text('Cash back')),
                   ButtonSegment(value: 'card_manual', label: Text('Back to card')),
                   if (hasAcct) ButtonSegment(value: 'account', label: Text('Account credit')),
