@@ -155,12 +155,17 @@ class _MenuScreenState extends State<MenuScreen> {
                       final margin = net <= 0 ? 0.0 : (net - cost) / net * 100;
                       final can = canMake[id];
                       return DataRow(cells: [
-                        DataCell(Text('${p['name']}${p['active'] == false ? ' (off)' : ''}',
-                            style: TextStyle(
-                                fontWeight: FontWeight.w600,
-                                color: p['active'] == false ? Brand.muted : null))),
-                        DataCell(Text(catName[p['category_id']] ?? '')),
-                        DataCell(Text(money(price))),
+                        DataCell(
+                            Text('${p['name']}${p['active'] == false ? ' (off)' : ''}',
+                                style: TextStyle(
+                                    fontWeight: FontWeight.w700,
+                                    decoration: TextDecoration.underline,
+                                    color: p['active'] == false ? Brand.muted : Brand.navy)),
+                            onTap: () => _viewProduct(context, p, '${catName[p['category_id']] ?? ''}', rate, canMake[id], cats)),
+                        DataCell(Text(catName[p['category_id']] ?? ''),
+                            onTap: () => _viewProduct(context, p, '${catName[p['category_id']] ?? ''}', rate, canMake[id], cats)),
+                        DataCell(Text(money(price)),
+                            onTap: () => _viewProduct(context, p, '${catName[p['category_id']] ?? ''}', rate, canMake[id], cats)),
                         DataCell(Text(
                             const {'standard': '15%', 'zero': 'Zero-rated', 'exempt': 'Exempt'}[p['vat_type'] ?? 'standard'] ?? '15%',
                             style: TextStyle(color: (p['vat_type'] ?? 'standard') == 'standard' ? Brand.muted : Brand.amber))),
@@ -175,6 +180,9 @@ class _MenuScreenState extends State<MenuScreen> {
                         DataCell(Text(can == null ? '-' : '$can',
                             style: TextStyle(color: can != null && can <= 0 ? Brand.red : null))),
                         DataCell(Row(children: [
+                          TextButton(
+                              onPressed: () => _viewProduct(context, p, '${catName[p['category_id']] ?? ''}', rate, canMake[id], cats),
+                              child: const Text('View')),
                           TextButton(onPressed: () => _editRecipe(context, p), child: const Text('Recipe')),
                           TextButton(onPressed: () => _editProduct(context, p, cats), child: const Text('Edit')),
                         ])),
@@ -192,6 +200,118 @@ class _MenuScreenState extends State<MenuScreen> {
         ]);
       },
     );
+  }
+
+  /// What a menu item is: its price and VAT, and everything in one portion with what it costs.
+  Future<void> _viewProduct(BuildContext context, Map<String, dynamic> p, String category, num rate, dynamic canMake,
+      List<Map<String, dynamic>> cats) async {
+    final id = p['id'] as String;
+    final price = n(p['price']).toDouble();
+    final vatType = '${p['vat_type'] ?? 'standard'}';
+    final net = vatType == 'standard' ? price * 100 / (100 + rate) : price;
+    final lines = LocalStore.rows('recipe_lines').where((l) => l['product_id'] == id).toList()
+      ..sort((a, b) => '${_stockItem(a['stock_item_id'])?['name']}'.compareTo('${_stockItem(b['stock_item_id'])?['name']}'));
+    double lineCost(Map<String, dynamic> l) =>
+        n(l['qty']) * (1 + n(l['waste_pct']) / 100) * n(_stockItem(l['stock_item_id'])?['avg_cost']);
+    final cost = lines.fold<double>(0, (t, l) => t + lineCost(l));
+    final profit = net - cost;
+    final margin = net <= 0 ? 0.0 : profit / net * 100;
+    String q(num v) => v == v.roundToDouble() ? v.toInt().toString() : v.toStringAsFixed(2);
+    Widget fact(String l, String v, {Color? color}) => SizedBox(
+          width: 170,
+          child: Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(l, style: const TextStyle(color: Brand.muted, fontSize: 12)),
+              Text(v, style: TextStyle(fontWeight: FontWeight.w700, color: color)),
+            ]),
+          ),
+        );
+    final action = await showDialog<String>(
+      context: context,
+      builder: (ctx) => Dialog(
+        insetPadding: const EdgeInsets.all(16),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 720, maxHeight: 720),
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: SingleChildScrollView(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Row(children: [
+                  Expanded(child: Text('${p['name']}', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800))),
+                  IconButton(onPressed: () => Navigator.pop(ctx), icon: const Icon(Icons.close)),
+                ]),
+                if ('${p['description'] ?? ''}'.trim().isNotEmpty)
+                  Padding(padding: const EdgeInsets.only(bottom: 10), child: Text('${p['description']}', style: const TextStyle(color: Brand.muted))),
+                Wrap(children: [
+                  fact('Category', category.isEmpty ? '-' : category),
+                  fact('Price (incl. VAT)', money(price)),
+                  fact('VAT', const {'standard': '15%', 'zero': 'Zero-rated', 'exempt': 'Exempt'}[vatType] ?? '15%'),
+                  fact('Price excl. VAT', money(net)),
+                  fact('Status', p['active'] == false ? 'Switched off' : 'On the menu'),
+                  fact('Can make now', canMake == null ? '-' : '$canMake', color: canMake != null && canMake <= 0 ? Brand.red : null),
+                ]),
+                const Divider(height: 24),
+                const Text("What's in it", style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                const SizedBox(height: 6),
+                if (lines.isEmpty)
+                  const Text('No ingredients yet. Without a recipe, stock is not reduced when this item is sold.',
+                      style: TextStyle(color: Brand.amber, fontWeight: FontWeight.w600))
+                else
+                  SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: DataTable(
+                      headingRowHeight: 38,
+                      dataRowMinHeight: 36,
+                      dataRowMaxHeight: 44,
+                      columnSpacing: 20,
+                      columns: const [
+                        DataColumn(label: Text('Ingredient')),
+                        DataColumn(label: Text('Per portion'), numeric: true),
+                        DataColumn(label: Text('Waste'), numeric: true),
+                        DataColumn(label: Text('On hand'), numeric: true),
+                        DataColumn(label: Text('Cost'), numeric: true),
+                      ],
+                      rows: [
+                        for (final l in lines)
+                          DataRow(cells: [
+                            DataCell(Text('${_stockItem(l['stock_item_id'])?['name'] ?? 'Removed item'}')),
+                            DataCell(Text('${q(n(l['qty']))} ${_stockItem(l['stock_item_id'])?['unit'] ?? ''}')),
+                            DataCell(Text(n(l['waste_pct']) > 0 ? '${q(n(l['waste_pct']))}%' : '-')),
+                            DataCell(Text('${q(n(_stockItem(l['stock_item_id'])?['qty_on_hand']))} ${_stockItem(l['stock_item_id'])?['unit'] ?? ''}')),
+                            DataCell(Text(money(lineCost(l)))),
+                          ]),
+                        DataRow(cells: [
+                          const DataCell(Text('Ingredient cost', style: TextStyle(fontWeight: FontWeight.w800))),
+                          const DataCell(Text('')),
+                          const DataCell(Text('')),
+                          const DataCell(Text('')),
+                          DataCell(Text(money(cost), style: const TextStyle(fontWeight: FontWeight.w800))),
+                        ]),
+                      ],
+                    ),
+                  ),
+                if (lines.isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  Wrap(children: [
+                    fact('Profit per portion (excl. VAT)', money(profit)),
+                    fact('Margin', '${margin.toStringAsFixed(1)}%', color: margin < 55 ? Brand.red : (margin < 65 ? Brand.amber : Brand.green)),
+                  ]),
+                ],
+                const SizedBox(height: 8),
+                Wrap(spacing: 8, runSpacing: 8, children: [
+                  FilledButton.tonal(onPressed: () => Navigator.pop(ctx, 'recipe'), child: const Text('Edit recipe')),
+                  OutlinedButton(onPressed: () => Navigator.pop(ctx, 'edit'), child: const Text('Edit item')),
+                ]),
+              ]),
+            ),
+          ),
+        ),
+      ),
+    );
+    if (!context.mounted) return;
+    if (action == 'recipe') await _editRecipe(context, p);
+    if (action == 'edit') await _editProduct(context, p, cats);
   }
 
   // ---- categories ----------------------------------------------------------
