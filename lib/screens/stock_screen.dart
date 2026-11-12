@@ -7,6 +7,7 @@ import '../data/sync_service.dart';
 import '../theme.dart';
 import '../auth/auth_service.dart';
 import 'purchase_orders.dart';
+import 'stock_item_view.dart';
 import 'stocktake_tab.dart';
 
 SupabaseClient get _db => Supabase.instance.client;
@@ -235,8 +236,19 @@ class _LevelsTabState extends State<_LevelsTab> {
                       DataCell(Text(money(n(i['qty_on_hand']) * n(i['avg_cost'])))),
                       DataCell(Text(_supplierName(i['supplier_id']))),
                       DataCell(Row(children: [
+                        TextButton(
+                            onPressed: () => showStockItemView(context, i,
+                                onAdjust: () => _adjust(context, i),
+                                onEdit: () => _editItem(context, i),
+                                onDelete: AuthService.instance.role == 'admin' ? () => _deleteItem(context, i) : null),
+                            child: const Text('View')),
                         TextButton(onPressed: () => _adjust(context, i), child: const Text('Adjust')),
                         TextButton(onPressed: () => _editItem(context, i), child: const Text('Edit')),
+                        if (AuthService.instance.role == 'admin')
+                          TextButton(
+                              style: TextButton.styleFrom(foregroundColor: Brand.red),
+                              onPressed: () => _deleteItem(context, i),
+                              child: const Text('Delete')),
                       ])),
                     ]),
                 ],
@@ -246,6 +258,41 @@ class _LevelsTabState extends State<_LevelsTab> {
         ]);
       },
     );
+  }
+
+  /// Admin only. An item with no history is removed. One with history is hidden, because the record of what moved is never erased.
+  Future<void> _deleteItem(BuildContext context, Map<String, dynamic> item) async {
+    final onHand = n(item['qty_on_hand']);
+    final go = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Delete ${item['name']}?'),
+        content: Text([
+          if (onHand != 0) 'There are still ${_qty(onHand)} ${item['unit']} on hand, worth ${money(onHand * n(item['avg_cost']))}.',
+          'If this item has never been received, sold or counted it is removed for good.',
+          'If it has history, it is hidden from the stock list and the history is kept.',
+          'It cannot be deleted while a recipe or special request uses it.',
+        ].join('\n\n')),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: Brand.red, foregroundColor: Colors.white),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Delete')),
+        ],
+      ),
+    );
+    if (go != true || !context.mounted) return;
+    String? result;
+    final ok = await _online(context, () async {
+      result = '${await _db.rpc('delete_stock_item', params: {'p_id': item['id']})}';
+    });
+    if (ok && context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(result == 'archived'
+              ? '${item['name']} has history, so it is hidden from the list and the history is kept.'
+              : '${item['name']} deleted.')));
+    }
   }
 
   /// Stock take, waste or manual correction. Recorded as a movement so there is a history.
