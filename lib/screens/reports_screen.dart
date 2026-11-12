@@ -9,7 +9,9 @@ import '../receipt/download_file.dart';
 import '../receipt/report_export.dart';
 import '../theme.dart';
 import '../widgets/brand_mark.dart' show companyDisplayName;
+import '../auth/auth_service.dart';
 import 'report_charts.dart';
+import 'till_reports.dart';
 
 /// Admin reports. All figures are calculated on the server for the chosen dates,
 /// so they are exact and do not depend on what is stored on this device.
@@ -47,7 +49,16 @@ class _ReportsScreenState extends State<ReportsScreen> {
   @override
   void initState() {
     super.initState();
+    chartStyle.value = '${companyRow()?['chart_style'] ?? 'auto'}';
     _load();
+  }
+
+  /// Admin picks how every graph is drawn. The choice is saved with the company settings, so every device follows it.
+  Future<void> _setChartStyle(String v) async {
+    chartStyle.value = v;
+    try {
+      await LocalStore.patch('company_settings', 1, {'chart_style': v});
+    } catch (_) {}
   }
 
   /// Start (inclusive) and end (exclusive) in this device's local time.
@@ -198,6 +209,13 @@ class _ReportsScreenState extends State<ReportsScreen> {
   Future<void> _download(String kind, int tab) async {
     final d = _data;
     if (d == null) return;
+    if (tab >= reportTabNames.length) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('Use the Excel (CSV) button inside this report.')));
+      }
+      return;
+    }
     try {
       if (kind == 'csv') {
         final bytes = reportCsv(tab, _periodText, d, _refunds);
@@ -230,7 +248,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
   Widget build(BuildContext context) {
     final range = _loaded;
     return DefaultTabController(
-      length: 7,
+      length: 9,
       child: Column(
         children: [
           Padding(
@@ -245,6 +263,25 @@ class _ReportsScreenState extends State<ReportsScreen> {
                           style: TextStyle(
                               fontSize: 24, fontWeight: FontWeight.w800, color: Brand.navy)),
                     ),
+                    if (AuthService.instance.role == 'admin')
+                      ValueListenableBuilder<String>(
+                        valueListenable: chartStyle,
+                        builder: (_, cur, __) => PopupMenuButton<String>(
+                          tooltip: 'Graph style',
+                          onSelected: _setChartStyle,
+                          itemBuilder: (_) => [
+                            for (final e in chartStyleNames.entries)
+                              CheckedPopupMenuItem(value: e.key, checked: cur == e.key, child: Text(e.value)),
+                          ],
+                          child: IgnorePointer(
+                            child: OutlinedButton.icon(
+                                onPressed: () {},
+                                icon: const Icon(Icons.insert_chart_outlined, size: 18),
+                                label: Text('Graphs: ${chartStyleNames[cur] ?? 'Automatic'}')),
+                          ),
+                        ),
+                      ),
+                    const SizedBox(width: 8),
                     Builder(
                       builder: (ctx) => PopupMenuButton<String>(
                         enabled: _data != null,
@@ -316,6 +353,8 @@ class _ReportsScreenState extends State<ReportsScreen> {
               Tab(text: 'Stock usage'),
               Tab(text: 'Stock value & purchases'),
               Tab(text: 'Cancelled orders'),
+              Tab(text: 'Till money'),
+              Tab(text: 'Cash flow'),
             ],
           ),
           Expanded(
@@ -337,6 +376,8 @@ class _ReportsScreenState extends State<ReportsScreen> {
                             _usage(),
                             _valuation(),
                             _voids(),
+                            TillMoneyReport(range: _loaded ?? _range()),
+                            CashFlowReport(range: _loaded ?? _range()),
                           ]),
                           if (_loading) const LinearProgressIndicator(),
                           if (_cachedAt != null)
@@ -479,7 +520,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
             sub: money(n(voided['total'])), color: n(voided['orders']) > 0 ? Brand.red : null),
       ]),
       const SizedBox(height: 16),
-      LineCard(
+      AdaptiveLine(
         title: 'Sales trend',
         points: [
           for (final d in _list('by_day'))
@@ -489,7 +530,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
         format: (v) => money(v),
         note: 'Tap a point to pin its figures.',
       ),
-      BarCard(
+      AdaptiveBars(
         title: 'Busiest hours',
         points: [
           for (final h in _list('by_hour'))
@@ -501,7 +542,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
         note: 'Use this to plan staffing and prep.',
       ),
       LayoutBuilder(builder: (context, box) {
-        final pay = PieCard(
+        final pay = AdaptivePie(
           title: 'Payment methods',
           slices: [
             for (final p in _list('payments'))
@@ -509,7 +550,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
           ],
           format: (v) => money(v),
         );
-        final type = PieCard(
+        final type = AdaptivePie(
           title: 'Order types',
           slices: [
             for (final t in _list('by_type'))
@@ -592,7 +633,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
     String fmtMetric(double v) => _metric == 'qty' ? '${v.toStringAsFixed(0)} sold' : money(v);
 
     return ListView(padding: const EdgeInsets.all(20), children: [
-      RankedBars(
+      AdaptiveRanked(
         title: 'Top products',
         points: [
           for (final p in shown)
@@ -633,12 +674,12 @@ class _ReportsScreenState extends State<ReportsScreen> {
           ),
         ]),
       ),
-      PieCard(
+      AdaptivePie(
         title: 'Sales share by category',
         slices: [for (final c in cats) ChartPoint('${c['category']}', n(c['revenue']).toDouble())],
         format: (v) => money(v),
       ),
-      RankedBars(
+      AdaptiveRanked(
         title: 'Lowest margin products',
         points: [
           for (final p in ([...rows.where((p) => n(p['net']) > 0)]
@@ -695,7 +736,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
   Widget _staff() {
     final rows = _list('by_staff');
     return ListView(padding: const EdgeInsets.all(20), children: [
-      RankedBars(
+      AdaptiveRanked(
         title: 'Sales by staff member',
         points: [
           for (final r in rows)
@@ -771,7 +812,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
               style: const TextStyle(color: Color(0xFF7A4B00), fontWeight: FontWeight.w600)),
         ),
       const SizedBox(height: 16),
-      RankedBars(
+      AdaptiveRanked(
         title: 'How long stock will last',
         points: [
           for (final r in ([...rows.where((r) => r['days_left'] != null)]
@@ -852,7 +893,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
         _tile('Ingredient cost used', money(cost), sub: 'From sales, at average cost'),
       ]),
       const SizedBox(height: 16),
-      RankedBars(
+      AdaptiveRanked(
         title: 'Biggest ingredient costs',
         points: [
           for (final r in ([...rows]..sort((a, b) => n(b['cost_used']).compareTo(n(a['cost_used'])))).take(10))
@@ -862,7 +903,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
         format: (v) => money(v),
         note: 'Where your food spend goes. Tap a bar for the quantity used.',
       ),
-      RankedBars(
+      AdaptiveRanked(
         title: 'Waste',
         points: [
           for (final r in ([...rows.where((r) => n(r['waste']) > 0)]
@@ -906,13 +947,13 @@ class _ReportsScreenState extends State<ReportsScreen> {
         _tile('Purchased in period', money(total), sub: 'Posted GRVs, incl. VAT'),
       ]),
       const SizedBox(height: 16),
-      PieCard(
+      AdaptivePie(
         title: 'Where your stock money is',
         slices: [for (final v in _list('valuation')) ChartPoint('${v['category']}', n(v['value']).toDouble())],
         format: (v) => money(v),
         note: 'Tap a slice to see its value.',
       ),
-      BarCard(
+      AdaptiveBars(
         title: 'Purchases by supplier',
         points: [
           for (final p in purchases)

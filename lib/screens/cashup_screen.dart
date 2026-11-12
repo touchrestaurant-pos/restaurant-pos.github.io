@@ -7,7 +7,10 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../auth/auth_service.dart';
 import '../data/local_store.dart';
 import '../data/repo.dart';
+import '../receipt/day_docs.dart';
 import '../receipt/download_file.dart';
+import 'package:printing/printing.dart';
+import 'till_screen.dart' show tillCategories;
 import '../theme.dart';
 
 SupabaseClient get _db => Supabase.instance.client;
@@ -115,6 +118,19 @@ class _CashUpScreenState extends State<CashUpScreen> {
     if (mounted) setState(() => _saving = false);
   }
 
+  /// The whole day on one page: sales, VAT, payments, money out of the tills, cash-up counts.
+  Future<void> _summaryReport() async {
+    try {
+      final r = Map<String, dynamic>.from(await _db.rpc('daily_summary', params: {'p_date': _d(_day)}) as Map);
+      final bytes = await dailySummaryPdf(r, company: '${companyRow()?['trading_name'] ?? ''}'.isEmpty ? '${companyRow()?['company_name'] ?? ''}' : '${companyRow()?['trading_name']}');
+      await Printing.layoutPdf(name: 'Daily-summary-${_d(_day)}', onLayout: (_) async => bytes);
+    } on PostgrestException catch (e) {
+      _say(e.message);
+    } catch (_) {
+      _say('The summary report needs an internet connection.');
+    }
+  }
+
   static const _kinds = {
     'drop': 'Cash drop (safe / bank)',
     'payout': 'Pay-out (petty cash)',
@@ -126,8 +142,10 @@ class _CashUpScreenState extends State<CashUpScreen> {
 
   Future<void> _addMovement() async {
     String kind = 'drop';
+    String category = 'Cash drop to safe';
     final amount = TextEditingController();
     final note = TextEditingController();
+    final reference = TextEditingController();
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => StatefulBuilder(builder: (ctx, set) {
@@ -141,8 +159,21 @@ class _CashUpScreenState extends State<CashUpScreen> {
                 initialValue: kind,
                 decoration: const InputDecoration(labelText: 'What happened'),
                 items: [for (final e in _kinds.entries) DropdownMenuItem(value: e.key, child: Text(e.value))],
-                onChanged: (v) => set(() => kind = v ?? 'drop'),
+                onChanged: (v) => set(() {
+                  kind = v ?? 'drop';
+                  category = kind == 'drop' ? 'Cash drop to safe' : (kind == 'tip_payout' ? 'Tips paid out' : (kind == 'float_in' ? '' : 'Petty cash'));
+                }),
               ),
+              if (kind == 'payout')
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: DropdownButtonFormField<String>(
+                    initialValue: tillCategories.contains(category) ? category : 'Petty cash',
+                    decoration: const InputDecoration(labelText: 'What is the money for?'),
+                    items: [for (final c in tillCategories.where((c) => c != 'Cash drop to safe' && c != 'Tips paid out')) DropdownMenuItem(value: c, child: Text(c))],
+                    onChanged: (v) => set(() => category = v ?? category),
+                  ),
+                ),
               const SizedBox(height: 8),
               TextField(
                   controller: amount,
@@ -150,6 +181,11 @@ class _CashUpScreenState extends State<CashUpScreen> {
                   keyboardType: const TextInputType.numberWithOptions(decimal: true),
                   onChanged: (_) => set(() {}),
                   decoration: const InputDecoration(labelText: 'Amount', prefixText: 'R ')),
+              const SizedBox(height: 8),
+              TextField(
+                  controller: reference,
+                  onChanged: (_) => set(() {}),
+                  decoration: const InputDecoration(labelText: 'Reference (slip, invoice or receipt number)')),
               const SizedBox(height: 8),
               TextField(
                   controller: note,
@@ -160,7 +196,9 @@ class _CashUpScreenState extends State<CashUpScreen> {
           actions: [
             TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
             FilledButton(
-                onPressed: a > 0 && note.text.trim().isNotEmpty ? () => Navigator.pop(ctx, true) : null,
+                onPressed: a > 0 && note.text.trim().isNotEmpty && (kind == 'float_in' || reference.text.trim().isNotEmpty)
+                    ? () => Navigator.pop(ctx, true)
+                    : null,
                 child: const Text('Save')),
           ],
         );
@@ -174,6 +212,8 @@ class _CashUpScreenState extends State<CashUpScreen> {
         'amount': double.parse(amount.text.replaceAll(',', '.')),
         'note': note.text.trim(),
         'staff_id': _staff,
+        if (category.isNotEmpty) 'category': category,
+        if (reference.text.trim().isNotEmpty) 'reference': reference.text.trim(),
       });
       await _load();
     } on PostgrestException catch (e) {
@@ -333,6 +373,9 @@ class _CashUpScreenState extends State<CashUpScreen> {
             child: Text('Cash-up',
                 style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800, color: Brand.navy))),
         OutlinedButton.icon(
+            onPressed: _loading ? null : _summaryReport, icon: const Icon(Icons.summarize_outlined, size: 18), label: const Text('Summary report')),
+        const SizedBox(width: 8),
+        OutlinedButton.icon(
             onPressed: _loading ? null : _load, icon: const Icon(Icons.refresh, size: 18), label: const Text('Refresh')),
       ]),
       const SizedBox(height: 8),
@@ -482,8 +525,8 @@ class _CashUpScreenState extends State<CashUpScreen> {
                 ListTile(
                   dense: true,
                   contentPadding: EdgeInsets.zero,
-                  title: Text('${_kinds[m['kind']] ?? m['kind']} · ${m['note']}'),
-                  subtitle: Text('${m['by']}'),
+                  title: Text('${m['category'] ?? _kinds[m['kind']] ?? m['kind']} · ${m['note']}'),
+                  subtitle: Text('${m['by']}${'${m['reference'] ?? ''}'.isEmpty ? '' : ' · Ref ${m['reference']}'}'),
                   trailing: Row(mainAxisSize: MainAxisSize.min, children: [
                     Text('${m['kind'] == 'float_in' ? '+' : '-'}${money(n(m['amount']))}',
                         style: const TextStyle(fontWeight: FontWeight.w700)),

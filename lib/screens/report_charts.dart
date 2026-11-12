@@ -489,3 +489,96 @@ class _RankedBarsState extends State<RankedBars> {
     );
   }
 }
+
+// ---- Graph style chosen by the admin (Settings, saved in company_settings.chart_style) ----
+
+/// 'auto' keeps each chart's own style. The others redraw every chart in the chosen style.
+final ValueNotifier<String> chartStyle = ValueNotifier<String>('auto');
+
+const chartStyleNames = {
+  'auto': 'Automatic',
+  'bars': 'Bars',
+  'line': 'Line',
+  'pie': 'Pie',
+  'ranked': 'Ranked list',
+};
+
+/// Drop-in for BarCard that follows the chosen graph style.
+class AdaptiveBars extends StatelessWidget {
+  const AdaptiveBars({super.key, required this.title, required this.points, required this.format, this.note, this.color = Brand.navy});
+  final String title;
+  final List<ChartPoint> points;
+  final String Function(double) format;
+  final String? note;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) => ValueListenableBuilder<String>(
+        valueListenable: chartStyle,
+        builder: (_, s, __) => _styled(s, 'bars', title, points, format, note, color: color),
+      );
+}
+
+/// Drop-in for LineCard.
+class AdaptiveLine extends StatelessWidget {
+  const AdaptiveLine({super.key, required this.title, required this.points, required this.format, this.note});
+  final String title;
+  final List<ChartPoint> points;
+  final String Function(double) format;
+  final String? note;
+
+  @override
+  Widget build(BuildContext context) => ValueListenableBuilder<String>(
+        valueListenable: chartStyle,
+        builder: (_, s, __) => _styled(s, 'line', title, points, format, note),
+      );
+}
+
+/// Drop-in for PieCard (give the slices as points).
+class AdaptivePie extends StatelessWidget {
+  const AdaptivePie({super.key, required this.title, required this.slices, required this.format, this.note});
+  final String title;
+  final List<ChartPoint> slices;
+  final String Function(double) format;
+  final String? note;
+
+  @override
+  Widget build(BuildContext context) => ValueListenableBuilder<String>(
+        valueListenable: chartStyle,
+        builder: (_, s, __) => _styled(s, 'pie', title, slices, format, note),
+      );
+}
+
+/// Drop-in for RankedBars.
+class AdaptiveRanked extends StatelessWidget {
+  const AdaptiveRanked({super.key, required this.title, required this.points, required this.format, this.note, this.action, this.colorFor});
+  final String title;
+  final List<ChartPoint> points;
+  final String Function(double) format;
+  final String? note;
+  final Widget? action;
+  final Color Function(ChartPoint)? colorFor;
+
+  @override
+  Widget build(BuildContext context) => ValueListenableBuilder<String>(
+        valueListenable: chartStyle,
+        builder: (_, s, __) => _styled(s, 'ranked', title, points, format, note, action: action, colorFor: colorFor),
+      );
+}
+
+Widget _styled(String style, String own, String title, List<ChartPoint> points, String Function(double) format, String? note,
+    {Color color = Brand.navy, Widget? action, Color Function(ChartPoint)? colorFor}) {
+  final use = (style == 'auto' || !chartStyleNames.containsKey(style)) ? own : style;
+  // A pie cannot show negative values, so those keep their own style.
+  final negative = points.any((p) => p.value < 0);
+  switch (negative && use == 'pie' ? own == 'pie' ? 'bars' : own : use) {
+    case 'line':
+      return LineCard(title: title, points: points, format: format, note: note);
+    case 'pie':
+      return PieCard(title: title, slices: points, format: format, note: note);
+    case 'ranked':
+      return RankedBars(title: title, points: points, format: format, note: note, action: action, colorFor: colorFor);
+    default:
+      return BarCard(title: title, points: points, format: format, note: note, color: color);
+  }
+}
