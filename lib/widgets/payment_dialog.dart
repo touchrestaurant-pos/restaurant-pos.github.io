@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../auth/permissions.dart';
+
 import '../data/accounts_repo.dart';
 import '../data/repo.dart';
 import '../theme.dart';
@@ -229,7 +231,7 @@ class _PaymentDialogState extends State<_PaymentDialog> {
                       onPressed: () => setState(() => _showTip = true),
                       icon: const Icon(Icons.add, size: 16),
                       label: const Text('Add a tip')),
-                if (AccountsRepo.enabled && widget.due > 0.005)
+                if (AccountsRepo.enabled && Perms.canAccountSale && widget.due > 0.005)
                   TextButton.icon(
                       onPressed: () async {
                         final a = await pickAccountPayment(context, widget.due);

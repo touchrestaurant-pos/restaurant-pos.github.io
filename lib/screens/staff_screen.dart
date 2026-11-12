@@ -4,6 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../auth/auth_service.dart';
 import '../data/local_store.dart';
 import '../data/sync_service.dart';
+import '../auth/permissions.dart';
 import '../theme.dart';
 
 const roleLabels = {
@@ -55,6 +56,17 @@ class StaffScreen extends StatelessWidget {
     if (done == true && context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text('New password set for ${s['full_name']}')));
+    }
+  }
+
+  Future<void> _permissions(BuildContext context, Map<String, dynamic> s) async {
+    final result = await showDialog<Map<String, dynamic>>(context: context, builder: (_) => _PermissionsDialog(staff: s));
+    if (result != null) {
+      await _save({...s, 'perms': result});
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('Permissions saved for ${s['full_name']}. They apply the next time that person signs in or the app syncs.')));
+      }
     }
   }
 
@@ -148,6 +160,12 @@ class StaffScreen extends StatelessWidget {
                                     },
                             ),
                             const SizedBox(width: 4),
+                            if (s['role'] == 'cashier')
+                              TextButton.icon(
+                                onPressed: () => _permissions(context, s),
+                                icon: const Icon(Icons.shield_outlined, size: 20),
+                                label: const Text('Permissions'),
+                              ),
                             TextButton.icon(
                               onPressed: () => _reset(context, s),
                               icon: const Icon(Icons.lock_reset, size: 20),
@@ -369,6 +387,102 @@ class _ResetPasswordDialogState extends State<_ResetPasswordDialog> {
         FilledButton(
           onPressed: _busy ? null : _save,
           child: Text(_busy ? 'Saving...' : 'Set password'),
+        ),
+      ],
+    );
+  }
+}
+
+
+/// What one cashier may do. A blank number means "use the default".
+class _PermissionsDialog extends StatefulWidget {
+  const _PermissionsDialog({required this.staff});
+  final Map<String, dynamic> staff;
+
+  @override
+  State<_PermissionsDialog> createState() => _PermissionsDialogState();
+}
+
+class _PermissionsDialogState extends State<_PermissionsDialog> {
+  late final Map<String, dynamic> _p;
+  final _nums = <String, TextEditingController>{};
+
+  @override
+  void initState() {
+    super.initState();
+    final cur = widget.staff['perms'];
+    _p = cur is Map ? Map<String, dynamic>.from(cur) : {};
+    for (final d in permDefs.where((d) => d.number)) {
+      final v = _p[d.key];
+      _nums[d.key] = TextEditingController(text: v is num ? (v % 1 == 0 ? '${v.toInt()}' : '$v') : '');
+    }
+  }
+
+  @override
+  void dispose() {
+    for (final c in _nums.values) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text('Permissions for ${widget.staff['full_name']}'),
+      content: SizedBox(
+        width: 520,
+        child: SingleChildScrollView(
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const Text('These limits apply to this cashier only. Supervisors and admins are not limited by them.',
+                style: TextStyle(color: Brand.muted)),
+            const SizedBox(height: 8),
+            for (final d in permDefs)
+              if (d.number)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 6),
+                  child: TextField(
+                    controller: _nums[d.key],
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    decoration: InputDecoration(
+                      labelText: d.title,
+                      helperText: '${d.help}${d.serverChecked ? ' Checked by the server too.' : ''}',
+                      helperMaxLines: 3,
+                      hintText: d.defaultValue == null ? 'blank = company limit' : 'blank = ${d.defaultValue}${d.unit}',
+                      suffixText: d.unit == '%' ? '%' : null,
+                      prefixText: d.unit == 'R' ? 'R ' : null,
+                    ),
+                  ),
+                )
+              else
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: Text(d.title),
+                  subtitle: Text('${d.help}${d.serverChecked ? ' Checked by the server too.' : ''}'),
+                  value: (_p[d.key] is bool ? _p[d.key] : d.defaultValue) == true,
+                  onChanged: (v) => setState(() => _p[d.key] = v),
+                ),
+          ]),
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+        TextButton(onPressed: () => Navigator.pop(context, <String, dynamic>{}), child: const Text('Reset to defaults')),
+        FilledButton(
+          onPressed: () {
+            final out = <String, dynamic>{};
+            for (final d in permDefs) {
+              if (d.number) {
+                final t = _nums[d.key]!.text.trim().replaceAll(',', '.');
+                final v = double.tryParse(t);
+                if (v != null && v >= 0) out[d.key] = v;
+              } else if (_p[d.key] is bool) {
+                out[d.key] = _p[d.key];
+              }
+            }
+            Navigator.pop(context, out);
+          },
+          child: const Text('Save'),
         ),
       ],
     );

@@ -10,6 +10,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../auth/auth_service.dart';
+import '../auth/permissions.dart';
 import '../data/local_store.dart';
 import '../data/repo.dart';
 import '../data/sync_service.dart';
@@ -417,7 +418,20 @@ bool kitchenTicketOn() => LocalStore.getMeta('kitchen_ticket') == true;
 Future<void> setKitchenTicket(bool v) => LocalStore.setMeta('kitchen_ticket', v);
 
 /// Kitchen ticket: big item names and special requests, no prices.
-Future<Uint8List> kitchenTicketPdf(String orderId, {Set<dynamic>? onlyItemIds}) async {
+/// The number the kitchen sees: the invoice number once the order is paid, otherwise the order number
+/// (the till's own letters are left off). An invoice number only exists after payment.
+String kitchenNumber(Map<String, dynamic> o) {
+  final inv = o['invoice_no'];
+  if (inv != null) {
+    final prefix = '${companyRow()?['invoice_prefix'] ?? 'INV'}'.trim();
+    return '${prefix.isEmpty ? 'INV' : prefix}-${'$inv'.padLeft(6, '0')}';
+  }
+  final ref = '${o['order_ref'] ?? ''}';
+  final digits = RegExp(r'\d+$').firstMatch(ref)?.group(0);
+  return 'ORDER ${digits ?? ref}';
+}
+
+Future<Uint8List> kitchenTicketPdf(String orderId, {Set<dynamic>? onlyItemIds, bool reprint = false}) async {
   final o = LocalStore.row('orders', orderId) ?? const {};
   final items = LocalStore.rows('order_items')
       .where((i) => i['order_id'] == orderId && i['voided'] != true && (onlyItemIds == null || onlyItemIds.contains(i['id'])))
@@ -425,7 +439,7 @@ Future<Uint8List> kitchenTicketPdf(String orderId, {Set<dynamic>? onlyItemIds}) 
     ..sort((a, b) => '${a['created_at']}'.compareTo('${b['created_at']}'));
   const types = {'eat_in': 'EAT IN', 'take_away': 'TAKE AWAY', 'delivery': 'DELIVERY'};
   final t = parseTime(o['created_at']) ?? DateTime.now();
-  final doc = pw.Document(title: 'Kitchen ${o['order_ref']}');
+  final doc = pw.Document(title: 'Kitchen ${kitchenNumber(o)}');
   pw.TextStyle st(double size, {bool bold = true}) =>
       pw.TextStyle(fontSize: size, fontWeight: bold ? pw.FontWeight.bold : pw.FontWeight.normal);
   doc.addPage(pw.Page(
@@ -436,7 +450,8 @@ Future<Uint8List> kitchenTicketPdf(String orderId, {Set<dynamic>? onlyItemIds}) 
       // fixed page length. A minimum length avoids that.
       constraints: const pw.BoxConstraints(minHeight: 70 * PdfPageFormat.mm),
       child: pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.stretch, children: [
-        pw.Text('#${o['order_ref']}', style: st(22), textAlign: pw.TextAlign.center),
+        if (reprint) pw.Text('** REPRINT **', style: st(13), textAlign: pw.TextAlign.center),
+        pw.Text(kitchenNumber(o), style: st(22), textAlign: pw.TextAlign.center),
         pw.Text(
             '${types[o['order_type']] ?? ''}${o['table_no'] != null ? '  TABLE ${o['table_no']}' : ''}',
             style: st(13),
@@ -463,6 +478,20 @@ Future<Uint8List> kitchenTicketPdf(String orderId, {Set<dynamic>? onlyItemIds}) 
 
 Future<void> maybePrintKitchenTicket(String orderId, {Set<dynamic>? onlyItemIds}) async {
   if (!kitchenTicketOn()) return;
+  await _printKitchen(orderId, onlyItemIds: onlyItemIds);
+}
+
+/// Print the kitchen slip again (even when automatic kitchen printing is off) and record who did it.
+Future<void> reprintKitchenTicket(String orderId) async {
+  try {
+    await Supabase.instance.client.rpc('log_reprint', params: {'p_order': orderId});
+  } catch (_) {
+    // Offline: the slip still prints.
+  }
+  await _printKitchen(orderId, reprint: true);
+}
+
+Future<void> _printKitchen(String orderId, {Set<dynamic>? onlyItemIds, bool reprint = false}) async {
   try {
     final url = LocalStore.getMeta('kitchen_printer_url') as String? ?? LocalStore.getMeta('printer_url') as String?;
     if (!kIsWeb && url != null) {
@@ -471,7 +500,7 @@ Future<void> maybePrintKitchenTicket(String orderId, {Set<dynamic>? onlyItemIds}
         name: 'Kitchen-$orderId',
         format: slipFormat(),
         usePrinterSettings: false,
-        onLayout: (_) => kitchenTicketPdf(orderId, onlyItemIds: onlyItemIds),
+        onLayout: (_) => kitchenTicketPdf(orderId, onlyItemIds: onlyItemIds, reprint: reprint),
       );
       if (ok) return;
     }
@@ -480,7 +509,7 @@ Future<void> maybePrintKitchenTicket(String orderId, {Set<dynamic>? onlyItemIds}
       format: slipFormat(),
       dynamicLayout: false,
       usePrinterSettings: false,
-      onLayout: (_) => kitchenTicketPdf(orderId, onlyItemIds: onlyItemIds),
+      onLayout: (_) => kitchenTicketPdf(orderId, onlyItemIds: onlyItemIds, reprint: reprint),
     );
   } catch (_) {
     // A printer problem must never stop the till.
@@ -729,6 +758,14 @@ class _ReceiptDialogState extends State<_ReceiptDialog> {
               },
               icon: const Icon(Icons.picture_as_pdf, size: 18),
               label: const Text('Download PDF')),
+          if (Perms.canReprintKitchen && LocalStore.row('orders', r.order['id']) != null && r.order['status'] != 'void')
+            OutlinedButton.icon(
+                onPressed: () async {
+                  await reprintKitchenTicket('${r.order['id']}');
+                  _say('Kitchen slip sent to the printer.');
+                },
+                icon: const Icon(Icons.restaurant, size: 18),
+                label: const Text('Kitchen slip')),
           OutlinedButton.icon(
               onPressed: () => _email(r),
               icon: const Icon(Icons.email_outlined, size: 18),

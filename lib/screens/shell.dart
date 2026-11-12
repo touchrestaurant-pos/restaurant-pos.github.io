@@ -5,6 +5,7 @@ import '../theme.dart';
 import '../widgets/brand_mark.dart';
 import '../widgets/change_password_dialog.dart';
 import '../widgets/approval_pin.dart';
+import '../auth/permissions.dart';
 import '../widgets/sync_chip.dart';
 import 'accounts_screen.dart';
 import 'till_screen.dart';
@@ -69,7 +70,7 @@ class _ShellState extends State<Shell> {
     const settings = _Tab('Settings', Icons.settings_outlined, _settings, 'Admin');
     switch (role) {
       case 'cashier':
-        return const [order, orders, till];
+        return [order, orders, if (Perms.canPayout) till];
       case 'kitchen':
         return const [kitchen];
       case 'stock':

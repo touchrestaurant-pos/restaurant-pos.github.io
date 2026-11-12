@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../auth/auth_service.dart';
+import '../auth/permissions.dart';
 import '../data/local_store.dart';
 import '../data/repo.dart';
 import '../data/sync_service.dart';
@@ -12,7 +13,7 @@ import '../widgets/payment_dialog.dart';
 bool get _isManager => const ['admin', 'supervisor'].contains(AuthService.instance.role);
 
 /// Cashiers may give up to this much discount; supervisors and admins any amount.
-const _cashierMaxDiscountPct = 10.0;
+// The limit is now set per cashier (Staff > Permissions); see Perms.maxDiscountPct.
 
 /// Take an order: pick items, add special requests, discount, pay now (or split
 /// the bill), or send it and pay later. Also tables and open orders.
@@ -872,7 +873,7 @@ class _DiscountDialogState extends State<_DiscountDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final needsApproval = !_isManager && _pct > _cashierMaxDiscountPct + 0.001;
+    final needsApproval = !_isManager && _pct > Perms.maxDiscountPct + 0.001;
     final approved = _approvedBy != null && _amount <= _approvedUpTo + 0.005;
     final overLimit = needsApproval && !approved;
     final valid = _amount > 0 && _reason.text.trim().isNotEmpty && !overLimit;
@@ -928,7 +929,7 @@ class _DiscountDialogState extends State<_DiscountDialog> {
             Padding(
               padding: const EdgeInsets.only(top: 8),
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                const Text('Cashiers can give up to 10%. For more, a supervisor or admin must type their approval PIN.',
+                Text('You can give up to ${Perms.maxDiscountPct.toStringAsFixed(Perms.maxDiscountPct % 1 == 0 ? 0 : 1)}%. For more, a supervisor or admin must type their approval PIN.',
                     style: TextStyle(color: Brand.red)),
                 const SizedBox(height: 6),
                 Row(children: [
@@ -1192,6 +1193,15 @@ class _OpenOrdersDialogState extends State<_OpenOrdersDialog> {
                         if (o['order_type'] == 'eat_in')
                           OutlinedButton(onPressed: () => _moveTable(o), child: const Text('Move table')),
                         TextButton(onPressed: () => showReceiptDialog(context, id), child: const Text('Bill')),
+                        if (Perms.canReprintKitchen)
+                          TextButton(
+                              onPressed: () async {
+                                await reprintKitchenTicket(id);
+                                if (context.mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Kitchen slip sent to the printer.')));
+                                }
+                              },
+                              child: const Text('Kitchen slip')),
                         if (_isManager && paid <= 0)
                           TextButton(
                             style: TextButton.styleFrom(foregroundColor: Brand.red),
@@ -1248,7 +1258,7 @@ class _OrderItemsDialogState extends State<_OrderItemsDialog> {
               ].join(' · ')),
               trailing: TextButton(
                 style: TextButton.styleFrom(foregroundColor: Brand.red),
-                onPressed: (it['done'] == true && !_isManager)
+                onPressed: (it['done'] == true && !Perms.canRemoveSent)
                     ? null
                     : () async {
                         final o = LocalStore.row('orders', widget.orderId);
@@ -1262,7 +1272,7 @@ class _OrderItemsDialogState extends State<_OrderItemsDialog> {
                         SyncService.instance.syncNow();
                         setState(() {});
                       },
-                child: Text(it['done'] == true && !_isManager ? 'Ask supervisor' : 'Remove'),
+                child: Text(it['done'] == true && !Perms.canRemoveSent ? 'Ask supervisor' : 'Remove'),
               ),
             ),
           if (items.isEmpty) const Text('No items left on this order.'),
@@ -1411,7 +1421,7 @@ class _CancelDialogState extends State<_CancelDialog> {
                   final items = OrderRepo.liveItemsFor(id);
                   final summary = items.map((e) => '${e['qty']}× ${e['name']}').join(', ');
                   final hasPayment = o['paid'] == true || OrderRepo.paidAmount(id) > 0;
-                  final allowed = !hasPayment || _isManager;
+                  final allowed = hasPayment ? _isManager : Perms.canCancelUnpaid;
                   return ListTile(
                     contentPadding: EdgeInsets.zero,
                     title: Text('#${o['order_ref']} · ${money(n(o['total']))}${hasPayment ? ' · PAID' : ''}',
@@ -1423,7 +1433,7 @@ class _CancelDialogState extends State<_CancelDialog> {
                             onPressed: _busy ? null : () => _cancel(o),
                             child: const Text('Cancel'),
                           )
-                        : const Text('Paid: ask a\nsupervisor', textAlign: TextAlign.right, style: TextStyle(color: Brand.muted)),
+                        : Text(hasPayment ? 'Paid: ask a\nsupervisor' : 'Ask a\nsupervisor', textAlign: TextAlign.right, style: TextStyle(color: Brand.muted)),
                   );
                 },
               ),
