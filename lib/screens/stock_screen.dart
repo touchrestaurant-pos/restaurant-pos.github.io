@@ -128,6 +128,10 @@ class _LevelsTabState extends State<_LevelsTab> {
           return true;
         }).toList();
         final value = all.fold<double>(0, (s, i) => s + n(i['qty_on_hand']) * n(i['avg_cost']));
+        void open(Map<String, dynamic> i) => showStockItemView(context, i,
+            onAdjust: () => _adjust(context, i),
+            onEdit: () => _editItem(context, i),
+            onDelete: AuthService.instance.role == 'admin' ? () => _deleteItem(context, i) : null);
 
         Widget chip(String key, String label) => Padding(
               padding: const EdgeInsets.only(right: 8),
@@ -223,25 +227,22 @@ class _LevelsTabState extends State<_LevelsTab> {
                 rows: [
                   for (final i in shown)
                     DataRow(cells: [
-                      DataCell(Text('${i['name']}', style: const TextStyle(fontWeight: FontWeight.w600))),
-                      DataCell(Text('${i['category'] ?? ''}')),
+                      DataCell(Text('${i['name']}', style: const TextStyle(fontWeight: FontWeight.w700, color: Brand.navy, decoration: TextDecoration.underline)),
+                          onTap: () => open(i)),
+                      DataCell(Text('${i['category'] ?? ''}'), onTap: () => open(i)),
                       DataCell(Text('${_qty(i['qty_on_hand'])} ${i['unit']}',
                           style: TextStyle(
                               fontWeight: FontWeight.w700,
                               color: n(i['qty_on_hand']) <= 0
                                   ? Brand.red
-                                  : (low(i) ? Brand.amber : Brand.navy)))),
-                      DataCell(Text(_qty(i['min_level']))),
-                      DataCell(Text(money(n(i['avg_cost'])))),
-                      DataCell(Text(money(n(i['qty_on_hand']) * n(i['avg_cost'])))),
-                      DataCell(Text(_supplierName(i['supplier_id']))),
+                                  : (low(i) ? Brand.amber : Brand.navy))),
+                          onTap: () => open(i)),
+                      DataCell(Text(_qty(i['min_level'])), onTap: () => open(i)),
+                      DataCell(Text(money(n(i['avg_cost']))), onTap: () => open(i)),
+                      DataCell(Text(money(n(i['qty_on_hand']) * n(i['avg_cost']))), onTap: () => open(i)),
+                      DataCell(Text(_supplierName(i['supplier_id'])), onTap: () => open(i)),
                       DataCell(Row(children: [
-                        TextButton(
-                            onPressed: () => showStockItemView(context, i,
-                                onAdjust: () => _adjust(context, i),
-                                onEdit: () => _editItem(context, i),
-                                onDelete: AuthService.instance.role == 'admin' ? () => _deleteItem(context, i) : null),
-                            child: const Text('View')),
+                        TextButton(onPressed: () => open(i), child: const Text('View')),
                         TextButton(onPressed: () => _adjust(context, i), child: const Text('Adjust')),
                         TextButton(onPressed: () => _editItem(context, i), child: const Text('Edit')),
                         if (AuthService.instance.role == 'admin')

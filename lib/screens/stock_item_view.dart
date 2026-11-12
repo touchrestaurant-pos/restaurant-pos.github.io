@@ -154,6 +154,11 @@ class _ViewState extends State<_View> {
                 onPressed: () { Navigator.pop(context); widget.onDelete!(); },
                 child: const Text('Delete')),
         ]),
+        if (_usedIn().isNotEmpty) ...[
+          const SizedBox(height: 4),
+          const Text('Used in', style: TextStyle(fontWeight: FontWeight.w700)),
+          Text(_usedIn().join(' · '), style: const TextStyle(color: Brand.muted, fontSize: 12), maxLines: 3, overflow: TextOverflow.ellipsis),
+        ],
         const Divider(height: 24),
         Row(children: [
           const Expanded(child: Text('Stock movements', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700))),
@@ -214,6 +219,19 @@ class _ViewState extends State<_View> {
         ),
       ]),
     );
+  }
+
+  /// Menu items and special requests that take this item out of stock.
+  List<String> _usedIn() {
+    final id = widget.item['id'];
+    final unit = '${widget.item['unit']}';
+    return [
+      for (final r in LocalStore.rows('recipe_lines'))
+        if (r['stock_item_id'] == id)
+          '${LocalStore.row('products', r['product_id'])?['name'] ?? 'Menu item'} (${_q(n(r['qty']))} $unit)',
+      for (final m in LocalStore.rows('modifiers'))
+        if (m['stock_item_id'] == id) '${m['name']} (extra)',
+    ];
   }
 
   String _supplier(dynamic id) {
