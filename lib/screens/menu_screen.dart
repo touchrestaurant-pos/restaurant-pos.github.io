@@ -206,16 +206,14 @@ class _MenuScreenState extends State<MenuScreen> {
   Future<void> _viewProduct(BuildContext context, Map<String, dynamic> p, String category, num rate, dynamic canMake,
       List<Map<String, dynamic>> cats) async {
     final id = p['id'] as String;
-    final price = n(p['price']).toDouble();
+    final oldPrice = n(p['price']).toDouble();
+    final priceCtl = TextEditingController(text: oldPrice.toStringAsFixed(2));
     final vatType = '${p['vat_type'] ?? 'standard'}';
-    final net = vatType == 'standard' ? price * 100 / (100 + rate) : price;
     final lines = LocalStore.rows('recipe_lines').where((l) => l['product_id'] == id).toList()
       ..sort((a, b) => '${_stockItem(a['stock_item_id'])?['name']}'.compareTo('${_stockItem(b['stock_item_id'])?['name']}'));
     double lineCost(Map<String, dynamic> l) =>
         n(l['qty']) * (1 + n(l['waste_pct']) / 100) * n(_stockItem(l['stock_item_id'])?['avg_cost']);
     final cost = lines.fold<double>(0, (t, l) => t + lineCost(l));
-    final profit = net - cost;
-    final margin = net <= 0 ? 0.0 : profit / net * 100;
     String q(num v) => v == v.roundToDouble() ? v.toInt().toString() : v.toStringAsFixed(2);
     Widget fact(String l, String v, {Color? color}) => SizedBox(
           width: 170,
@@ -229,7 +227,14 @@ class _MenuScreenState extends State<MenuScreen> {
         );
     final action = await showDialog<String>(
       context: context,
-      builder: (ctx) => Dialog(
+      builder: (ctx) => StatefulBuilder(builder: (ctx, set) {
+        final newPrice = double.tryParse(priceCtl.text.replaceAll(',', '.'));
+        final price = newPrice ?? oldPrice;
+        final net = vatType == 'standard' ? price * 100 / (100 + rate) : price;
+        final profit = net - cost;
+        final margin = net <= 0 ? 0.0 : profit / net * 100;
+        final changed = newPrice != null && newPrice >= 0 && (newPrice - oldPrice).abs() > 0.004;
+        return Dialog(
         insetPadding: const EdgeInsets.all(16),
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 720, maxHeight: 720),
@@ -245,7 +250,18 @@ class _MenuScreenState extends State<MenuScreen> {
                   Padding(padding: const EdgeInsets.only(bottom: 10), child: Text('${p['description']}', style: const TextStyle(color: Brand.muted))),
                 Wrap(children: [
                   fact('Category', category.isEmpty ? '-' : category),
-                  fact('Price (incl. VAT)', money(price)),
+                  SizedBox(
+                    width: 250,
+                    child: Padding(
+                      padding: const EdgeInsets.only(bottom: 8, right: 12),
+                      child: TextField(
+                        controller: priceCtl,
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                        onChanged: (_) => set(() {}),
+                        decoration: const InputDecoration(labelText: 'Selling price (incl. VAT)', prefixText: 'R ', isDense: true),
+                      ),
+                    ),
+                  ),
                   fact('VAT', const {'standard': '15%', 'zero': 'Zero-rated', 'exempt': 'Exempt'}[vatType] ?? '15%'),
                   fact('Price excl. VAT', money(net)),
                   fact('Status', p['active'] == false ? 'Switched off' : 'On the menu'),
@@ -300,6 +316,7 @@ class _MenuScreenState extends State<MenuScreen> {
                 ],
                 const SizedBox(height: 8),
                 Wrap(spacing: 8, runSpacing: 8, children: [
+                  FilledButton(onPressed: changed ? () => Navigator.pop(ctx, 'price') : null, child: const Text('Save price')),
                   FilledButton.tonal(onPressed: () => Navigator.pop(ctx, 'recipe'), child: const Text('Edit recipe')),
                   OutlinedButton(onPressed: () => Navigator.pop(ctx, 'edit'), child: const Text('Edit item')),
                 ]),
@@ -307,9 +324,17 @@ class _MenuScreenState extends State<MenuScreen> {
             ),
           ),
         ),
-      ),
+      );
+      }),
     );
     if (!context.mounted) return;
+    if (action == 'price') {
+      final v = double.parse(priceCtl.text.replaceAll(',', '.'));
+      await _online(context, () async {
+        await _db.from('products').update({'price': v}).eq('id', id);
+      });
+      return;
+    }
     if (action == 'recipe') await _editRecipe(context, p);
     if (action == 'edit') await _editProduct(context, p, cats);
   }
