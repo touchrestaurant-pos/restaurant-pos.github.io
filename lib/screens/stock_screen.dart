@@ -106,6 +106,29 @@ class _LevelsTabState extends State<_LevelsTab> {
   String _search = '';
   String _filter = 'all'; // all, low, out
   String _category = 'All';
+  DateTime? _lastCount;
+  bool _countChecked = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkLastCount();
+  }
+
+  /// When the last posted stock-take was, so the screen can remind the owner to count.
+  Future<void> _checkLastCount() async {
+    try {
+      final rows = await Supabase.instance.client
+          .from('stocktakes')
+          .select('created_at')
+          .eq('status', 'posted')
+          .order('created_at', ascending: false)
+          .limit(1);
+      if (rows.isNotEmpty) _lastCount = DateTime.tryParse('${rows.first['created_at']}')?.toLocal();
+      _countChecked = true;
+    } catch (_) {}
+    if (mounted) setState(() {});
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -169,6 +192,28 @@ class _LevelsTabState extends State<_LevelsTab> {
                         '${LocalStore.row('stock_items', l['stock_item_id'])?['name']} · expires ${l['expiry_date']} '
                         '(${posted[l['grv_id']]?['grv_no'] ?? ''}, received ${_qty(l['received_qty'])})'),
                 ]),
+              ),
+            ),
+          if (_countChecked && (_lastCount == null || DateTime.now().difference(_lastCount!).inDays >= 7))
+            Card(
+              color: const Color(0xFFFFF4D6),
+              child: Padding(
+                padding: const EdgeInsets.all(14),
+                child: Text(
+                    _lastCount == null
+                        ? 'No stock-take has been posted yet. Count the stock to see what is missing or wasted (Stock-take tab).'
+                        : 'Last stock-take was ${DateTime.now().difference(_lastCount!).inDays} days ago. Count the stock weekly so losses show up early (Stock-take tab).',
+                    style: const TextStyle(color: Color(0xFF7A4B00), fontWeight: FontWeight.w600)),
+              ),
+            ),
+          if (all.any(low))
+            Card(
+              color: const Color(0xFFFDE7EA),
+              child: Padding(
+                padding: const EdgeInsets.all(14),
+                child: Text(
+                    'Running low (${all.where(low).length}): ${all.where(low).take(10).map((i) => i['name']).join(', ')}${all.where(low).length > 10 ? ' ...' : ''}. Use the Low filter, then order from the Purchase orders tab.',
+                    style: const TextStyle(color: Brand.red, fontWeight: FontWeight.w600)),
               ),
             ),
           if (negative.isNotEmpty)

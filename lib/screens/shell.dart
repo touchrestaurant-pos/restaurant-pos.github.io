@@ -4,6 +4,7 @@ import '../auth/auth_service.dart';
 import '../theme.dart';
 import '../widgets/brand_mark.dart';
 import '../widgets/change_password_dialog.dart';
+import '../widgets/approval_pin.dart';
 import '../widgets/sync_chip.dart';
 import 'accounts_screen.dart';
 import 'till_screen.dart';
@@ -137,6 +138,7 @@ class _ShellState extends State<Shell> {
             icon: const Icon(Icons.account_circle, color: Brand.gold),
             onSelected: (v) {
               if (v == 'password') showChangePasswordDialog(context);
+              if (v == 'pin') showSetApprovalPinDialog(context);
               if (v == 'logout') auth.signOut();
             },
             itemBuilder: (_) => [
@@ -145,6 +147,8 @@ class _ShellState extends State<Shell> {
                 child: Text('${auth.fullName} · ${_roleNames[auth.role] ?? auth.role}'),
               ),
               const PopupMenuItem(value: 'password', child: Text('Change my password')),
+              if (const ['admin', 'supervisor'].contains(auth.role))
+                const PopupMenuItem(value: 'pin', child: Text('Set my approval PIN')),
               const PopupMenuItem(value: 'logout', child: Text('Log out')),
             ],
           ),

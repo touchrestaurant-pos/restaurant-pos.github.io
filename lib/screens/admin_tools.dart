@@ -145,10 +145,29 @@ class _AdminToolsState extends State<AdminTools> {
 
   List<Map<String, dynamic>> _audit = [];
   bool _auditLoaded = false;
+  String _auditFilter = 'all';
+
+  static const _auditNames = {
+    'all': 'Everything',
+    'approval': 'Manager approvals',
+    'cash_movements': 'Money out of tills',
+    'cash_ups': 'Cash-ups',
+    'refunds': 'Refunds',
+    'grvs': 'Stock received',
+    'stocktakes': 'Stock-takes',
+    'products': 'Menu items',
+    'stock_items': 'Stock items',
+    'staff_profiles': 'Staff',
+    'company_settings': 'Settings',
+    'customer_accounts': 'Customer accounts',
+    'order_items': 'Price differences',
+  };
 
   Future<void> _loadAudit() async {
     try {
-      final rows = await _db.from('audit_log').select().order('at', ascending: false).limit(100);
+      var q = _db.from('audit_log').select();
+      if (_auditFilter != 'all') q = q.eq('table_name', _auditFilter);
+      final rows = await q.order('at', ascending: false).limit(300);
       _audit = rows.map((e) => Map<String, dynamic>.from(e)).toList();
     } catch (_) {
       _say('The change history needs an internet connection.');
@@ -163,6 +182,10 @@ class _AdminToolsState extends State<AdminTools> {
     if (a['action'] == 'update') {
       return c.entries.map((e) => e.value is List ? '${e.key}: ${e.value[0]} -> ${e.value[1]}' : '${e.key}').join(', ');
     }
+    if (a['table_name'] == 'approval') {
+      return a['action'] == 'failed' ? 'wrong PIN typed (${c['what'] ?? ''})' : '${c['approved_by']} approved ${c['what']}: ${c['detail'] ?? ''}';
+    }
+    if (a['action'] == 'insert' && c.containsKey('amount')) return '${c['category'] ?? c['kind'] ?? ''} R${c['amount']} ${c['reference'] ?? ''} ${c['note'] ?? ''}'.trim();
     if (a['action'] == 'price_differs') return '${c['item']} charged ${c['charged']}, menu price ${c['menu_price']}';
     return '${c['name'] ?? c['full_name'] ?? a['row_id'] ?? ''}';
   }
@@ -281,11 +304,22 @@ class _AdminToolsState extends State<AdminTools> {
         if (_status != null) Padding(padding: const EdgeInsets.only(top: 8), child: Text(_status!)),
       ]),
       card('Change history', [
-        const Text('Who changed prices, recipes, stock items, staff and settings, and prices charged that differ from the menu.',
+        const Text('Who changed prices, recipes, stock, staff and settings; who took money out of a till, did refunds and cash-ups, received stock, and which manager approved what.',
             style: TextStyle(color: Brand.muted)),
         const SizedBox(height: 8),
+        Row(children: [
+          DropdownButton<String>(
+            value: _auditFilter,
+            underline: const SizedBox(),
+            items: [for (final e in _auditNames.entries) DropdownMenuItem(value: e.key, child: Text(e.value))],
+            onChanged: (v) {
+              setState(() => _auditFilter = v ?? 'all');
+              if (_auditLoaded) _loadAudit();
+            },
+          ),
+        ]),
         if (!_auditLoaded)
-          OutlinedButton(onPressed: _loadAudit, child: const Text('Show the last 100 changes'))
+          OutlinedButton(onPressed: _loadAudit, child: const Text('Show the last 300 changes'))
         else if (_audit.isEmpty)
           const Text('No changes recorded yet.')
         else

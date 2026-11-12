@@ -816,6 +816,43 @@ class _DiscountDialogState extends State<_DiscountDialog> {
   String _mode = 'pct';
   late final TextEditingController _value;
   late final TextEditingController _reason;
+  final _pin = TextEditingController();
+  String? _approvedBy;
+  double _approvedUpTo = 0;
+  String? _pinError;
+  bool _checking = false;
+
+  @override
+  void dispose() {
+    _pin.dispose();
+    super.dispose();
+  }
+
+  Future<void> _approve() async {
+    setState(() {
+      _checking = true;
+      _pinError = null;
+    });
+    try {
+      final r = await Supabase.instance.client.rpc('approve_with_pin', params: {
+        'p_pin': _pin.text.trim(),
+        'p_what': 'discount',
+        'p_detail': '${_pct.toStringAsFixed(1)}% (${money(_amount)}) - ${_reason.text.trim()}',
+      });
+      if (r == null) {
+        _pinError = 'That PIN is not right.';
+      } else {
+        _approvedBy = '$r';
+        _approvedUpTo = _amount;
+        _pin.clear();
+      }
+    } on PostgrestException catch (e) {
+      _pinError = e.message;
+    } catch (_) {
+      _pinError = 'Approval needs an internet connection. Ask a supervisor to log in instead.';
+    }
+    if (mounted) setState(() => _checking = false);
+  }
 
   @override
   void initState() {
@@ -835,7 +872,9 @@ class _DiscountDialogState extends State<_DiscountDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final overLimit = !_isManager && _pct > _cashierMaxDiscountPct + 0.001;
+    final needsApproval = !_isManager && _pct > _cashierMaxDiscountPct + 0.001;
+    final approved = _approvedBy != null && _amount <= _approvedUpTo + 0.005;
+    final overLimit = needsApproval && !approved;
     final valid = _amount > 0 && _reason.text.trim().isNotEmpty && !overLimit;
     return AlertDialog(
       title: const Text('Discount'),
@@ -886,10 +925,35 @@ class _DiscountDialogState extends State<_DiscountDialog> {
           Text('Discount ${money(_amount)} (${_pct.toStringAsFixed(1)}%) · new total ${money(widget.itemsTotal - _amount)}',
               style: const TextStyle(fontWeight: FontWeight.w700)),
           if (overLimit)
-            const Padding(
-              padding: EdgeInsets.only(top: 6),
-              child: Text('Cashiers can give up to 10%. Ask a supervisor for more.',
-                  style: TextStyle(color: Brand.red)),
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                const Text('Cashiers can give up to 10%. For more, a supervisor or admin must type their approval PIN.',
+                    style: TextStyle(color: Brand.red)),
+                const SizedBox(height: 6),
+                Row(children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _pin,
+                      obscureText: true,
+                      keyboardType: TextInputType.number,
+                      maxLength: 6,
+                      onChanged: (_) => setState(() {}),
+                      decoration: const InputDecoration(labelText: 'Manager PIN', isDense: true, counterText: ''),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  FilledButton(
+                      onPressed: _checking || _pin.text.trim().length < 4 || _reason.text.trim().isEmpty || _amount <= 0 ? null : _approve,
+                      child: Text(_checking ? '...' : 'Approve')),
+                ]),
+                if (_pinError != null) Text(_pinError!, style: const TextStyle(color: Brand.red, fontWeight: FontWeight.w600)),
+              ]),
+            ),
+          if (needsApproval && approved)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Text('Approved by $_approvedBy', style: const TextStyle(color: Brand.green, fontWeight: FontWeight.w700)),
             ),
         ]),
       ),
@@ -900,7 +964,7 @@ class _DiscountDialogState extends State<_DiscountDialog> {
               child: const Text('Remove discount')),
         TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
         FilledButton(
-          onPressed: valid ? () => Navigator.pop(context, {'amount': _amount, 'reason': _reason.text.trim()}) : null,
+          onPressed: valid ? () => Navigator.pop(context, {'amount': _amount, 'reason': needsApproval ? '${_reason.text.trim()} (approved by $_approvedBy)' : _reason.text.trim()}) : null,
           child: const Text('Apply'),
         ),
       ],
