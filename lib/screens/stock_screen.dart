@@ -710,7 +710,12 @@ class GrvEditorState extends State<GrvEditor> {
       'received_on': _date(_on),
       if (widget.grv == null) 'status': 'draft',
     };
-    await _db.from('grvs').upsert(head);
+    if (widget.grv == null) {
+      await _db.from('grvs').insert(head);
+    } else {
+      // An upsert would fail here: it checks grv_no before it notices the row already exists.
+      await _db.from('grvs').update(head).eq('id', id);
+    }
     await _db.from('grv_lines').delete().eq('grv_id', id);
     if (_lines.isNotEmpty) {
       await _db.from('grv_lines').insert([
