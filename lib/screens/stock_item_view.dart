@@ -191,6 +191,7 @@ class _ViewState extends State<_View> {
     final pack = '${i['purchase_unit'] ?? ''}'.isEmpty ? '-' : '1 ${i['purchase_unit']} = ${_q(n(i['purchase_factor']))} $unit';
     return Padding(
       padding: const EdgeInsets.all(20),
+      child: SingleChildScrollView(
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
           Expanded(child: Text('${i['name']}', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800))),
@@ -266,9 +267,9 @@ class _ViewState extends State<_View> {
                 style: const TextStyle(color: Brand.muted, fontSize: 12)),
           ),
         const SizedBox(height: 6),
-        Expanded(
-          child: _loading
-              ? const Center(child: CircularProgressIndicator())
+        Builder(
+          builder: (_) => _loading
+              ? const Padding(padding: EdgeInsets.all(24), child: Center(child: CircularProgressIndicator()))
               : _error != null
                   ? Text(_error!, style: const TextStyle(color: Brand.red, fontWeight: FontWeight.w600))
                   : shown.isEmpty
@@ -311,6 +312,7 @@ class _ViewState extends State<_View> {
                         ),
         ),
       ]),
+      ),
     );
   }
 
@@ -355,7 +357,7 @@ class _ViewState extends State<_View> {
       byReason[r] = (byReason[r] ?? 0) + n(m['qty_change']).abs().toDouble();
     }
     String f(double v) => '${_q(v)} $unit';
-    return ListView(children: [
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       AdaptiveLine(title: 'Quantity on hand', points: balancePts, format: f, note: 'The balance at the end of each day.'),
       AdaptiveBars(
           title: 'Stock in each day',
