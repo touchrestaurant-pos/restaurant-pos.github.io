@@ -4,6 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../data/local_store.dart';
 import '../data/repo.dart';
 import '../theme.dart';
+import 'report_charts.dart';
 
 const _reasons = {
   'grv': 'Delivery received',
@@ -51,6 +52,53 @@ class _ViewState extends State<_View> {
   bool _loading = true;
   String? _error;
   String _reason = 'all';
+  String _mode = 'table'; // table or graphs
+  String _preset = '30'; // 7, 30, month, all, custom
+  DateTime? _from;
+  DateTime? _to; // last day shown, inclusive
+
+  DateTime _today() {
+    final n0 = DateTime.now();
+    return DateTime(n0.year, n0.month, n0.day);
+  }
+
+  /// First day of the range, or null for everything.
+  DateTime? _rangeFrom() {
+    final t = _today();
+    switch (_preset) {
+      case '7':
+        return t.subtract(const Duration(days: 6));
+      case '30':
+        return t.subtract(const Duration(days: 29));
+      case 'month':
+        return DateTime(t.year, t.month, 1);
+      case 'custom':
+        return _from;
+      default:
+        return null;
+    }
+  }
+
+  DateTime? _rangeTo() => _preset == 'custom' ? _to : null;
+
+  Future<void> _pickRange() async {
+    final t = _today();
+    final r = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(t.year - 5),
+      lastDate: t,
+      initialDateRange: DateTimeRange(start: _from ?? t.subtract(const Duration(days: 29)), end: _to ?? t),
+    );
+    if (r == null) return;
+    setState(() {
+      _preset = 'custom';
+      _from = r.start;
+      _to = r.end;
+    });
+    _load();
+  }
+
+  String _day(DateTime d) => '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
 
   @override
   void initState() {
@@ -64,12 +112,15 @@ class _ViewState extends State<_View> {
       _error = null;
     });
     try {
-      final r = await Supabase.instance.client
+      // Everything from the start of the range up to now is read, so the balance after each
+      // movement can be worked back exactly from what is on hand today.
+      var q = Supabase.instance.client
           .from('stock_movements')
           .select('id,qty_change,reason,ref_id,note,created_by,created_at')
-          .eq('stock_item_id', widget.item['id'])
-          .order('created_at', ascending: false)
-          .limit(500);
+          .eq('stock_item_id', widget.item['id']);
+      final f = _rangeFrom();
+      if (f != null) q = q.gte('created_at', f.toUtc().toIso8601String());
+      final r = await q.order('created_at', ascending: false).limit(3000);
       _moves = (r as List).map((e) => Map<String, dynamic>.from(e as Map)).toList();
     } on PostgrestException catch (e) {
       _error = e.message;
@@ -112,9 +163,20 @@ class _ViewState extends State<_View> {
       balances.add(run);
       run -= n(m['qty_change']).toDouble();
     }
-    final shown = <int>[for (var k = 0; k < _moves.length; k++) if (_reason == 'all' || _moves[k]['reason'] == _reason) k];
-    final totalIn = _moves.where((m) => n(m['qty_change']) > 0).fold<double>(0, (s, m) => s + n(m['qty_change']).toDouble());
-    final totalOut = _moves.where((m) => n(m['qty_change']) < 0).fold<double>(0, (s, m) => s + n(m['qty_change']).toDouble());
+    final last = _rangeTo();
+    bool inRange(Map<String, dynamic> m) {
+      if (last == null) return true;
+      final t = parseTime(m['created_at']);
+      return t != null && t.isBefore(DateTime(last.year, last.month, last.day + 1));
+    }
+
+    final shown = <int>[
+      for (var k = 0; k < _moves.length; k++)
+        if (inRange(_moves[k]) && (_reason == 'all' || _moves[k]['reason'] == _reason)) k
+    ];
+    final inView = [for (final k in shown) _moves[k]];
+    final totalIn = inView.where((m) => n(m['qty_change']) > 0).fold<double>(0, (s, m) => s + n(m['qty_change']).toDouble());
+    final totalOut = inView.where((m) => n(m['qty_change']) < 0).fold<double>(0, (s, m) => s + n(m['qty_change']).toDouble());
     final unit = '${i['unit']}';
     Widget fact(String l, String v) => SizedBox(
           width: 190,
@@ -162,6 +224,31 @@ class _ViewState extends State<_View> {
         const Divider(height: 24),
         Row(children: [
           const Expanded(child: Text('Stock movements', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700))),
+          SegmentedButton<String>(
+            showSelectedIcon: false,
+            segments: const [
+              ButtonSegment(value: 'table', icon: Icon(Icons.table_rows_outlined, size: 18), label: Text('List')),
+              ButtonSegment(value: 'graphs', icon: Icon(Icons.show_chart, size: 18), label: Text('Graphs')),
+            ],
+            selected: {_mode},
+            onSelectionChanged: (v) => setState(() => _mode = v.first),
+          ),
+        ]),
+        const SizedBox(height: 6),
+        Wrap(spacing: 8, runSpacing: 6, crossAxisAlignment: WrapCrossAlignment.center, children: [
+          for (final e in const {'7': 'Last 7 days', '30': 'Last 30 days', 'month': 'This month', 'all': 'All time'}.entries)
+            ChoiceChip(
+                label: Text(e.value),
+                selected: _preset == e.key,
+                onSelected: (_) {
+                  setState(() => _preset = e.key);
+                  _load();
+                }),
+          ChoiceChip(
+              avatar: const Icon(Icons.date_range, size: 16),
+              label: Text(_preset == 'custom' && _from != null && _to != null ? '${_day(_from!)} to ${_day(_to!)}' : 'Pick dates'),
+              selected: _preset == 'custom',
+              onSelected: (_) => _pickRange()),
           DropdownButton<String>(
             value: _reason,
             items: [
@@ -172,8 +259,12 @@ class _ViewState extends State<_View> {
           ),
         ]),
         if (!_loading && _error == null)
-          Text('In ${_q(totalIn)} $unit · out ${_q(-totalOut)} $unit${_moves.length >= 500 ? ' · latest 500 movements' : ''}',
-              style: const TextStyle(color: Brand.muted, fontSize: 12)),
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Text(
+                'In ${_q(totalIn)} $unit · out ${_q(-totalOut)} $unit · net ${_q(totalIn + totalOut)} $unit · ${shown.length} movements${_moves.length >= 3000 ? ' · latest 3000 only' : ''}',
+                style: const TextStyle(color: Brand.muted, fontSize: 12)),
+          ),
         const SizedBox(height: 6),
         Expanded(
           child: _loading
@@ -181,8 +272,10 @@ class _ViewState extends State<_View> {
               : _error != null
                   ? Text(_error!, style: const TextStyle(color: Brand.red, fontWeight: FontWeight.w600))
                   : shown.isEmpty
-                      ? const Text('No movements to show.')
-                      : SingleChildScrollView(
+                      ? const Text('No movements in this period.')
+                      : _mode == 'graphs'
+                          ? _graphs(inView, balances, onHand, unit)
+                          : SingleChildScrollView(
                           child: SingleChildScrollView(
                             scrollDirection: Axis.horizontal,
                             child: DataTable(
@@ -219,6 +312,67 @@ class _ViewState extends State<_View> {
         ),
       ]),
     );
+  }
+
+  /// Balance over time, what came in and went out each day, and what the movements were for.
+  Widget _graphs(List<Map<String, dynamic>> inView, List<double> balances, double onHand, String unit) {
+    final first = _rangeFrom();
+    final t = _today();
+    final times = [for (final m in _moves) parseTime(m['created_at'])].whereType<DateTime>().toList();
+    var start = first ?? (times.isEmpty ? t : DateTime(times.last.year, times.last.month, times.last.day));
+    var end = _rangeTo() ?? t;
+    if (end.difference(start).inDays > 180) start = end.subtract(const Duration(days: 180));
+    // Opening balance = on hand today minus everything that moved since the start of the range.
+    var open = onHand;
+    for (final m in _moves) {
+      final tm = parseTime(m['created_at']);
+      if (tm != null && !tm.isBefore(start)) open -= n(m['qty_change']).toDouble();
+    }
+    final days = <DateTime>[];
+    for (var d = start; !d.isAfter(end); d = DateTime(d.year, d.month, d.day + 1)) {
+      days.add(d);
+    }
+    String key(DateTime d) => _day(d);
+    final inBy = <String, double>{}, outBy = <String, double>{}, netBy = <String, double>{};
+    for (final m in _moves) {
+      final tm = parseTime(m['created_at']);
+      if (tm == null || tm.isBefore(start) || !tm.isBefore(DateTime(end.year, end.month, end.day + 1))) continue;
+      final c = n(m['qty_change']).toDouble();
+      final k = key(DateTime(tm.year, tm.month, tm.day));
+      netBy[k] = (netBy[k] ?? 0) + c;
+      if (c > 0) inBy[k] = (inBy[k] ?? 0) + c;
+      if (c < 0) outBy[k] = (outBy[k] ?? 0) - c;
+    }
+    var run = open;
+    final balancePts = <ChartPoint>[];
+    for (final d in days) {
+      run += netBy[key(d)] ?? 0;
+      balancePts.add(ChartPoint(key(d).substring(5), double.parse(run.toStringAsFixed(3)), detail: 'Net ${_q(netBy[key(d)] ?? 0)} $unit that day'));
+    }
+    final byReason = <String, double>{};
+    for (final m in inView) {
+      final r = _reasons['${m['reason']}'] ?? '${m['reason']}';
+      byReason[r] = (byReason[r] ?? 0) + n(m['qty_change']).abs().toDouble();
+    }
+    String f(double v) => '${_q(v)} $unit';
+    return ListView(children: [
+      AdaptiveLine(title: 'Quantity on hand', points: balancePts, format: f, note: 'The balance at the end of each day.'),
+      AdaptiveBars(
+          title: 'Stock in each day',
+          points: [for (final d in days) ChartPoint(key(d).substring(5), inBy[key(d)] ?? 0)],
+          format: f,
+          color: Brand.green),
+      AdaptiveBars(
+          title: 'Stock out each day',
+          points: [for (final d in days) ChartPoint(key(d).substring(5), outBy[key(d)] ?? 0)],
+          format: f,
+          color: Brand.red),
+      AdaptivePie(
+          title: 'What moved it',
+          slices: [for (final e in byReason.entries) ChartPoint(e.key, e.value)],
+          format: f,
+          note: 'Quantity moved by reason, counting in and out together.'),
+    ]);
   }
 
   /// Menu items and special requests that take this item out of stock.
