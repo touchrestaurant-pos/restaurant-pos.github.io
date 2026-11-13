@@ -35,6 +35,7 @@ class _CashierScreenState extends State<CashierScreen> {
   String _view = 'menu'; // menu, tables
   double _discount = 0;
   String _discountReason = '';
+  String? _discountApproval;
 
   /// When set, the cart adds items to this unpaid order instead of a new one.
   String? _editingOrderId;
@@ -93,6 +94,7 @@ class _CashierScreenState extends State<CashierScreen> {
         _custAddress.clear();
         _discount = 0;
         _discountReason = '';
+        _discountApproval = null;
         _editingOrderId = null;
       });
 
@@ -121,6 +123,7 @@ class _CashierScreenState extends State<CashierScreen> {
     if (res != null) {
       _discount = (res['amount'] as num).toDouble();
       _discountReason = res['reason'] as String;
+      _discountApproval = res['approval'] as String?;
       refresh();
     }
   }
@@ -160,6 +163,7 @@ class _CashierScreenState extends State<CashierScreen> {
       deliveryAddress: _type == 'delivery' ? _custAddress.text : null,
       discount: _discount,
       discountReason: _discountReason,
+      discountApproval: _discountApproval,
       payments: payments,
     );
     SyncService.instance.syncNow();
@@ -199,6 +203,7 @@ class _CashierScreenState extends State<CashierScreen> {
       _cart.clear();
       _discount = 0;
       _discountReason = '';
+      _discountApproval = null;
       _editingOrderId = orderId;
       _view = 'menu';
       if (o != null) {
@@ -819,6 +824,7 @@ class _DiscountDialogState extends State<_DiscountDialog> {
   late final TextEditingController _reason;
   final _pin = TextEditingController();
   String? _approvedBy;
+  String? _approvalId;
   double _approvedUpTo = 0;
   String? _pinError;
   bool _checking = false;
@@ -835,15 +841,16 @@ class _DiscountDialogState extends State<_DiscountDialog> {
       _pinError = null;
     });
     try {
-      final r = await Supabase.instance.client.rpc('approve_with_pin', params: {
+      final r = await Supabase.instance.client.rpc('approve_discount', params: {
         'p_pin': _pin.text.trim(),
-        'p_what': 'discount',
-        'p_detail': '${_pct.toStringAsFixed(1)}% (${money(_amount)}) - ${_reason.text.trim()}',
+        'p_amount': _amount,
+        'p_detail': '${_pct.toStringAsFixed(1)}% - ${_reason.text.trim()}',
       });
       if (r == null) {
         _pinError = 'That PIN is not right.';
       } else {
-        _approvedBy = '$r';
+        _approvedBy = '${r['by']}';
+        _approvalId = '${r['id']}';
         _approvedUpTo = _amount;
         _pin.clear();
       }
@@ -965,7 +972,7 @@ class _DiscountDialogState extends State<_DiscountDialog> {
               child: const Text('Remove discount')),
         TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
         FilledButton(
-          onPressed: valid ? () => Navigator.pop(context, {'amount': _amount, 'reason': needsApproval ? '${_reason.text.trim()} (approved by $_approvedBy)' : _reason.text.trim()}) : null,
+          onPressed: valid ? () => Navigator.pop(context, {'amount': _amount, 'reason': needsApproval ? '${_reason.text.trim()} (approved by $_approvedBy)' : _reason.text.trim(), 'approval': needsApproval ? _approvalId : null}) : null,
           child: const Text('Apply'),
         ),
       ],

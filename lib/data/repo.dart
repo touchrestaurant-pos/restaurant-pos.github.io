@@ -268,6 +268,7 @@ class OrderRepo {
     String? deliveryAddress,
     double discount = 0,
     String? discountReason,
+    String? discountApproval,
     List<Map<String, dynamic>> payments = const [],
   }) async {
     final id = LocalStore.newId();
@@ -292,6 +293,7 @@ class OrderRepo {
       'total': t.total,
       'discount': round2(min(discount, t.itemsTotal)),
       'discount_reason': discount > 0 ? discountReason : null,
+      if (discount > 0 && discountApproval != null) 'discount_approval': discountApproval,
       'paid': paidSoFar + 0.005 >= t.total,
       'created_by': _me,
       'created_at': now,

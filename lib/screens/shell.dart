@@ -51,6 +51,26 @@ class Shell extends StatefulWidget {
 }
 
 class _ShellState extends State<Shell> {
+  /// Unsent sales are saved under the person who made them, so warn before someone else signs in over them.
+  Future<void> _confirmLogout(BuildContext context, AuthService auth) async {
+    if (LocalStore.pendingCount > 0) {
+      final go = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Some changes have not been sent'),
+          content: Text('${LocalStore.pendingCount} changes on this device have not reached the server yet. '
+              'Stay signed in with the internet on until the sync light is green. Sign out anyway?'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Stay signed in')),
+            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Sign out anyway')),
+          ],
+        ),
+      );
+      if (go != true) return;
+    }
+    auth.signOut();
+  }
+
   int _index = 0;
 
   List<_Tab> _tabsFor(String role) {
@@ -140,7 +160,7 @@ class _ShellState extends State<Shell> {
             onSelected: (v) {
               if (v == 'password') showChangePasswordDialog(context);
               if (v == 'pin') showSetApprovalPinDialog(context);
-              if (v == 'logout') auth.signOut();
+              if (v == 'logout') _confirmLogout(context, auth);
             },
             itemBuilder: (_) => [
               PopupMenuItem(
