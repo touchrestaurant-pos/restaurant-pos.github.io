@@ -32,7 +32,7 @@ Future<Uint8List> dailySummaryPdf(Map<String, dynamic> d, {String company = ''})
   final voided = Map<String, dynamic>.from((d['voided'] as Map?) ?? const {});
   final moves = _l(cash['movements']);
   final cashUps = _l(d['cash_ups']);
-  const methodNames = {'cash': 'Cash', 'card_manual': 'Card', 'account': 'On account'};
+  const methodNames = {'cash': 'Cash', 'card_manual': 'Card', 'eft': 'EFT', 'account': 'On account'};
   const vatNames = {'standard': 'Standard rated', 'zero': 'Zero rated', 'exempt': 'Exempt'};
 
   pw.Widget title(String t) => pw.Padding(
@@ -100,6 +100,8 @@ Future<Uint8List> dailySummaryPdf(Map<String, dynamic> d, {String company = ''})
         ['Account credit paid back in cash', '-${_m(cash['acct_cash_back'])}'],
         ['Money taken out of the till', '-${_m(cash['cash_out'])}'],
         ['Card payments (to match the machine)', _m(cash['card_sales'])],
+        if (n(cash['eft_sales']) > 0 || n(cash['eft_refunds']) > 0) ['EFT payments (to match the bank)', _m(cash['eft_sales'])],
+        if (n(cash['eft_refunds']) > 0) ['EFT refunds', '-${_m(cash['eft_refunds'])}'],
         ['Sold on account today (not paid yet)', _m(cash['account_sales'])],
       ]),
       title('Money taken out of the till'),

@@ -183,24 +183,55 @@ class TenderResult {
 ///   so no change is ever owed on a card or mixed payment.
 /// - Less than the bill is a part payment; the rest stays owed.
 /// - The tip goes on the card when a card is used, otherwise it comes out of the cash.
-TenderResult splitTender({required double due, double cash = 0, double card = 0, double tip = 0}) {
+/// Customer-facing name of a payment method.
+String methodLabel(dynamic m) {
+  switch ('$m') {
+    case 'cash':
+      return 'Cash';
+    case 'card_manual':
+      return 'Card';
+    case 'eft':
+      return 'EFT';
+    case 'account':
+      return 'On account';
+    default:
+      return '$m';
+  }
+}
+
+TenderResult splitTender(
+    {required double due,
+    double cash = 0,
+    double card = 0,
+    double eft = 0,
+    String eftReference = '',
+    double tip = 0}) {
   due = round2(due);
   cash = round2(max(0, cash));
   card = round2(max(0, card));
+  eft = round2(max(0, eft));
   tip = round2(max(0, tip));
   TenderResult bad(String m) => TenderResult(payments: const [], change: 0, remaining: due, error: m);
   final tipOnCard = card > 0;
   final cashForBill = round2(max(0, cash - (tipOnCard ? 0 : tip)));
+  final other = round2(card + eft); // card and EFT never give change
+  if (eft > due + 0.005) return bad('The EFT amount is more than the ${money(due)} owed.');
   if (card > due + 0.005) return bad('The card amount is more than the ${money(due)} owed.');
-  if (card > 0 && cashForBill + card > due + 0.005) {
-    return bad('Cash and card together are more than the ${money(due)} owed. '
-        'Put ${money(max(0, due - cashForBill))} on the card.');
+  if (other > due + 0.005 || (other > 0 && cashForBill + other > due + 0.005)) {
+    return bad('Cash, card and EFT together are more than the ${money(due)} owed. '
+        'Put ${money(max(0, due - cashForBill - (eft > 0 && card > 0 ? eft : 0)))} on the card or EFT.');
   }
-  if (cashForBill <= 0 && card <= 0) {
+  if (eft > 0 && card <= 0 && cash <= 0 && tip > 0) {
+    return bad('A tip cannot go on an EFT payment. Take the tip in cash or on a card.');
+  }
+  if (eft > 0 && eftReference.trim().isEmpty) {
+    return bad('Enter the bank reference for the EFT payment.');
+  }
+  if (cashForBill <= 0 && card <= 0 && eft <= 0) {
     return TenderResult(payments: const [], change: 0, remaining: due);
   }
   final cashApplied = round2(min(due, cashForBill));
-  final change = card > 0 ? 0.0 : round2(max(0, cashForBill - due));
+  final change = other > 0 ? 0.0 : round2(max(0, cashForBill - due));
   return TenderResult(
     payments: [
       if (cashApplied > 0)
@@ -212,9 +243,10 @@ TenderResult splitTender({required double due, double cash = 0, double card = 0,
           'change_given': change,
         },
       if (card > 0) {'method': 'card_manual', 'amount': card, 'tip': tip},
+      if (eft > 0) {'method': 'eft', 'amount': eft, 'tip': 0.0, 'reference': eftReference.trim()},
     ],
     change: change,
-    remaining: round2(max(0, due - cashApplied - card)),
+    remaining: round2(max(0, due - cashApplied - card - eft)),
   );
 }
 
@@ -320,6 +352,7 @@ class OrderRepo {
         if (p['card_brand'] != null) 'card_brand': p['card_brand'],
         if (p['card_last4'] != null) 'card_last4': p['card_last4'],
         if (p['slip_no'] != null) 'slip_no': p['slip_no'],
+        if (p['reference'] != null) 'reference': p['reference'],
         if (p['account_id'] != null) ...{
           'account_id': p['account_id'],
           'account_no': p['account_no'],

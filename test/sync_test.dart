@@ -197,5 +197,26 @@ void main() {
     test('nothing entered is not a payment', () {
       expect(splitTender(due: 150).payments, isEmpty);
     });
+    test('EFT needs a bank reference and gives no change', () {
+      expect(splitTender(due: 150, eft: 150).error, isNotNull);
+      final r = splitTender(due: 150, eft: 150, eftReference: ' ABC123 ');
+      expect(r.error, isNull);
+      expect(r.remaining, 0);
+      expect(r.change, 0);
+      expect(r.payments.single['method'], 'eft');
+      expect(r.payments.single['reference'], 'ABC123');
+    });
+    test('cash plus EFT, and over-paying with EFT is refused', () {
+      final r = splitTender(due: 150, cash: 100, eft: 50, eftReference: 'X1');
+      expect(r.error, isNull);
+      expect(r.payments.map((p) => p['method']).toList(), ['cash', 'eft']);
+      expect(splitTender(due: 150, cash: 100, eft: 60, eftReference: 'X1').error, isNotNull);
+      expect(splitTender(due: 150, eft: 151, eftReference: 'X1').error, isNotNull);
+      expect(splitTender(due: 150, cash: 200, eft: 10, eftReference: 'X1').error, isNotNull);
+    });
+    test('a tip cannot go on EFT alone', () {
+      expect(splitTender(due: 150, eft: 150, eftReference: 'X1', tip: 10).error, isNotNull);
+      expect(splitTender(due: 150, cash: 10, eft: 100, eftReference: 'X1', tip: 5).error, isNull);
+    });
   });
 }

@@ -29,6 +29,8 @@ const permDefs = <PermDef>[
       defaultValue: true, serverChecked: true),
   PermDef('can_payout', 'Can take money out of the till', 'Petty cash, supplier payments and so on (the Till money tab).',
       defaultValue: true, serverChecked: true),
+  PermDef('can_take_eft', 'Can take EFT / bank transfer payments', 'Switch off to stop this person recording EFT payments.',
+      defaultValue: true, serverChecked: true),
   PermDef('payout_limit', 'Most they can take out in one go',
       'Leave blank to use the company limit. 0 means no limit.',
       number: true, unit: 'R', defaultValue: null, serverChecked: true),
@@ -63,4 +65,5 @@ class Perms {
   static bool get canReprintKitchen => _bool('can_reprint_kitchen', true);
   static bool get canAccountSale => _bool('can_account_sale', true);
   static bool get canPayout => _bool('can_payout', true);
+  static bool get canTakeEft => _bool('can_take_eft', true);
 }

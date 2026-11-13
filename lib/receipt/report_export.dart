@@ -45,7 +45,7 @@ List<ReportTable> reportTables(int tab, Map<String, dynamic> d, Map<String, dyna
   }
 
   const types = {'eat_in': 'Eat in', 'take_away': 'Take away', 'delivery': 'Delivery'};
-  String method(dynamic x) => x == 'cash' ? 'Cash' : (x == 'account' ? 'On account' : 'Card');
+  String method(dynamic x) => methodLabel(x);
 
   // Tab 2 is the staff report; the ones after it keep their old numbers below.
   if (tab == 2) {
@@ -160,7 +160,7 @@ List<ReportTable> reportTables(int tab, Map<String, dynamic> d, Map<String, dyna
         ]),
         ReportTable('Refunds given', ['Order', 'When', 'Amount', 'Method', 'Reason'], [
           for (final r in rf)
-            ['#${r['ref']}', when(r['at']), m(r['amount']), r['method'] == 'cash' ? 'Cash' : (r['method'] == 'account' ? 'Account credit' : 'Card'), '${r['reason'] ?? ''}']
+            ['#${r['ref']}', when(r['at']), m(r['amount']), r['method'] == 'account' ? 'Account credit' : methodLabel(r['method']), '${r['reason'] ?? ''}']
         ]),
       ];
   }

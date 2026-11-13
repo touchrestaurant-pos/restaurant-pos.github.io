@@ -174,7 +174,7 @@ void _details(BuildContext context, String kind) {
       ]);
       final byMethod = <String, num>{};
       for (final p in LocalStore.rows('payments').where((p) => ids.contains(p['order_id']))) {
-        final m = const {'cash': 'Cash', 'card_manual': 'Card', 'account': 'On account'}['${p['method']}'] ?? '${p['method']}';
+        final m = const {'cash': 'Cash', 'card_manual': 'Card', 'eft': 'EFT', 'account': 'On account'}['${p['method']}'] ?? '${p['method']}';
         byMethod[m] = (byMethod[m] ?? 0) + n(p['amount']);
       }
       if (byMethod.isNotEmpty) {

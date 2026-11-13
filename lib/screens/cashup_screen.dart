@@ -273,8 +273,8 @@ class _CashUpScreenState extends State<CashUpScreen> {
       final sum = Map<String, dynamic>.from(row['summary'] as Map);
       final sm = Map<String, dynamic>.from((sum['summary'] as Map?) ?? const {});
       final cash = Map<String, dynamic>.from((sum['cash'] as Map?) ?? const {});
-      final liveCash = n(_sum?['cash_sales']) + n(_sum?['card_sales']);
-      final frozenCash = n(cash['cash_sales']) + n(cash['card_sales']);
+      final liveCash = n(_sum?['cash_sales']) + n(_sum?['card_sales']) + n(_sum?['eft_sales']);
+      final frozenCash = n(cash['cash_sales']) + n(cash['card_sales']) + n(cash['eft_sales']);
       final lines = <List<String>>[
         ['Paid orders', '${sm['orders'] ?? 0}'],
         ['Sales incl. VAT', money(n(sm['gross']))],
@@ -286,6 +286,7 @@ class _CashUpScreenState extends State<CashUpScreen> {
         ['Tips', money(n(sm['tips']))],
         ['Cash payments', money(n(cash['cash_sales']))],
         ['Card payments', money(n(cash['card_sales']))],
+        if (n(cash['eft_sales']) > 0) ['EFT payments', money(n(cash['eft_sales']))],
         if (n(cash['account_sales']) > 0) ['Sold on account', money(n(cash['account_sales']))],
         ['Cash refunds', money(n(cash['cash_refunds']))],
         ['Cash taken out', money(n(cash['cash_out']))],
@@ -494,6 +495,18 @@ class _CashUpScreenState extends State<CashUpScreen> {
                 const SizedBox(height: 8),
                 const Text('Compare this with the card machine settlement report for the day.',
                     style: TextStyle(color: Brand.muted, fontSize: 12)),
+                if (n(s['eft_sales']) > 0 || n(s['eft_refunds']) > 0) ...[
+                  const Divider(),
+                  const Text('EFT / bank transfers', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                  const SizedBox(height: 8),
+                  _row('EFT sales', money(n(s['eft_sales']))),
+                  _row('EFT payments to match', '${s['eft_count'] ?? 0}'),
+                  _row('EFT refunds', '-${money(n(s['eft_refunds']))}'),
+                  _row('EFT total to match against the bank', money(n(s['eft_sales']) - n(s['eft_refunds'])), bold: true),
+                  const SizedBox(height: 8),
+                  const Text('Not in the till drawer. Check these against the bank statement or banking app, using the references on each slip.',
+                      style: TextStyle(color: Brand.muted, fontSize: 12)),
+                ],
               ]),
             ),
           );
@@ -582,6 +595,7 @@ class _CashUpScreenState extends State<CashUpScreen> {
                   DataColumn(label: Text('Staff member')),
                   DataColumn(label: Text('Cash'), numeric: true),
                   DataColumn(label: Text('Card'), numeric: true),
+                  DataColumn(label: Text('EFT'), numeric: true),
                   DataColumn(label: Text('Tips'), numeric: true),
                   DataColumn(label: Text('Payments'), numeric: true),
                 ], rows: [
@@ -590,6 +604,7 @@ class _CashUpScreenState extends State<CashUpScreen> {
                       DataCell(Text('${b['name']}')),
                       DataCell(Text(money(n(b['cash'])))),
                       DataCell(Text(money(n(b['card'])))),
+                      DataCell(Text(money(n(b['eft'])))),
                       DataCell(Text(money(n(b['tips'])))),
                       DataCell(Text('${b['payments']}')),
                     ]),

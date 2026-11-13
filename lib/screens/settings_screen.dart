@@ -29,6 +29,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     'reg_number',
     'address',
     'receipt_footer',
+    'eft_details',
     'invoice_prefix',
     'timezone',
   ];
@@ -36,6 +37,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late final TextEditingController _vat;
   bool _cash = true;
   bool _card = true;
+  bool _eft = false;
   bool _showVat = true;
   bool _showNotes = false;
   bool _busy = false;
@@ -55,6 +57,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (_c['timezone']!.text.isEmpty) _c['timezone']!.text = 'Africa/Johannesburg';
     _cash = row['accept_cash'] != false;
     _card = row['accept_card_manual'] != false;
+    _eft = row['accept_eft'] == true;
     _showVat = row['show_vat_on_slip'] != false;
     _showNotes = row['show_notes_on_slip'] == true;
   }
@@ -81,7 +84,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _say('VAT rate must be a number between 0 and 100.', error: true);
       return;
     }
-    if (!_cash && !_card) {
+    if (!_cash && !_card && !_eft) {
       _say('Keep at least one payment method switched on.', error: true);
       return;
     }
@@ -95,6 +98,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       'vat_rate': rate,
       'accept_cash': _cash,
       'accept_card_manual': _card,
+      'accept_eft': _eft,
       'show_vat_on_slip': _showVat,
       'show_notes_on_slip': _showNotes,
       'table_count': tables,
@@ -359,13 +363,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
               value: _card,
               onChanged: (v) => setState(() => _card = v),
             ),
-            const SwitchListTile(
+            SwitchListTile(
               contentPadding: EdgeInsets.zero,
-              title: Text('EFT, SnapScan, card machine link'),
-              subtitle: Text('Coming later'),
-              value: false,
-              onChanged: null,
+              title: const Text('EFT / bank transfer'),
+              subtitle: const Text('The cashier records the bank reference. Shown on the slip and in the cash-up as a separate line, not in the till drawer.'),
+              value: _eft,
+              onChanged: (v) => setState(() => _eft = v),
             ),
+            if (_eft)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: TextField(
+                  controller: _c['eft_details'],
+                  minLines: 2,
+                  maxLines: 5,
+                  decoration: const InputDecoration(
+                    labelText: 'Banking details (shown to the cashier to read out)',
+                    hintText: 'Bank, account name, account number, branch code',
+                    isDense: true,
+                  ),
+                ),
+              ),
           ],
         ),
       ),

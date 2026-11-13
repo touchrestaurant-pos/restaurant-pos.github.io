@@ -1404,7 +1404,7 @@ class _CancelDialogState extends State<_CancelDialog> {
       await SyncService.instance.syncNow();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text('Order #${o['order_ref']} cancelled. ${toAccount > 0.005 ? '${money(toAccount)} was credited to the customer account. ' : ''}Give the customer ${money(toCustomer > 0 ? toCustomer : 0)} back${byMethod.length > 1 ? ' (${byMethod.entries.map((e) => '${money(e.value)} ${e.key == 'cash' ? 'cash' : 'to the card'}').join(', ')})' : ''}.')));
+            content: Text('Order #${o['order_ref']} cancelled. ${toAccount > 0.005 ? '${money(toAccount)} was credited to the customer account. ' : ''}Give the customer ${money(toCustomer > 0 ? toCustomer : 0)} back${byMethod.length > 1 ? ' (${byMethod.entries.map((e) => '${money(e.value)} ${e.key == 'cash' ? 'cash' : (e.key == 'eft' ? 'back by EFT' : 'to the card')}').join(', ')})' : ''}.')));
       }
     } on PostgrestException catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));

@@ -181,7 +181,7 @@ List<RLine> footerLines(String footer) {
   return out;
 }
 
-String _method(dynamic m) => m == 'cash' ? 'Cash' : (m == 'account' ? 'On account' : 'Card');
+String _method(dynamic m) => methodLabel(m);
 String _lineTotal(Map<String, dynamic> i) => money(n(i['qty']) * n(i['unit_price']));
 final _when = DateFormat('yyyy-MM-dd HH:mm');
 String _rate() => vatRate().toStringAsFixed(vatRate() == vatRate().roundToDouble() ? 0 : 1);
@@ -196,6 +196,9 @@ List<RLine> _paymentLines(ReceiptData r) {
   if (split) out.add(const RLine.row('PAYMENTS', '', size: 8, bold: true));
   for (final p in pays) {
     out.add(RLine.row(split ? '  ${_method(p['method'])}' : 'Paid by ${_method(p['method'])}', money(n(p['amount'])), size: 8));
+  }
+  for (final p in pays.where((p) => p['method'] == 'eft' && '${p['reference'] ?? ''}'.trim().isNotEmpty)) {
+    out.add(RLine.note('EFT ref: ${p['reference']}'));
   }
   final onAcct = pays.where((p) => p['method'] == 'account').toList();
   if (onAcct.isNotEmpty) {
@@ -683,6 +686,7 @@ class _ReceiptDialogState extends State<_ReceiptDialog> {
     final amount = TextEditingController(text: remaining.toStringAsFixed(2));
     final reason = TextEditingController();
     final hasAcct = r.payments.any((p) => p['method'] == 'account');
+    final hasEft = r.payments.any((p) => p['method'] == 'eft');
     String method = r.payments.isNotEmpty ? '${r.payments.first['method']}' : 'cash';
     bool restock = !r.cancelled;
     final refundId = LocalStore.newId(); // one id per dialog: a retry cannot refund twice
@@ -709,6 +713,7 @@ class _ReceiptDialogState extends State<_ReceiptDialog> {
                 segments: [
                   ButtonSegment(value: 'cash', label: Text('Cash back')),
                   ButtonSegment(value: 'card_manual', label: Text('Back to card')),
+                  if (hasEft) ButtonSegment(value: 'eft', label: Text('Back by EFT')),
                   if (hasAcct) ButtonSegment(value: 'account', label: Text('Account credit')),
                 ],
                 selected: {method},

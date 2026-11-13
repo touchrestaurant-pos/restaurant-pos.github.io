@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 
 import '../auth/permissions.dart';
@@ -64,8 +66,12 @@ class _PaymentDialog extends StatefulWidget {
 class _PaymentDialogState extends State<_PaymentDialog> {
   late bool _cashOk;
   late bool _cardOk;
+  late bool _eftOk;
+  late String _eftDetails;
   final _cash = TextEditingController();
   final _card = TextEditingController();
+  final _eft = TextEditingController();
+  final _eftRef = TextEditingController();
   final _tip = TextEditingController();
   bool _showTip = false;
 
@@ -75,13 +81,17 @@ class _PaymentDialogState extends State<_PaymentDialog> {
     final c = companyRow();
     _cashOk = c?['accept_cash'] != false;
     _cardOk = c?['accept_card_manual'] != false;
-    if (!_cashOk && !_cardOk) _cashOk = true;
+    _eftOk = c?['accept_eft'] == true && Perms.canTakeEft;
+    _eftDetails = '${c?['eft_details'] ?? ''}'.trim();
+    if (!_cashOk && !_cardOk && !_eftOk) _cashOk = true;
   }
 
   @override
   void dispose() {
     _cash.dispose();
     _card.dispose();
+    _eft.dispose();
+    _eftRef.dispose();
     _tip.dispose();
     super.dispose();
   }
@@ -89,7 +99,13 @@ class _PaymentDialogState extends State<_PaymentDialog> {
   double _num(TextEditingController c) => double.tryParse(c.text.trim().replaceAll(',', '.')) ?? 0;
   double get _tipValue => _num(_tip) < 0 ? 0 : round2(_num(_tip));
   TenderResult get _result =>
-      splitTender(due: widget.due, cash: _num(_cash), card: _num(_card), tip: _tipValue);
+      splitTender(
+          due: widget.due,
+          cash: _num(_cash),
+          card: _num(_card),
+          eft: _num(_eft),
+          eftReference: _eftRef.text,
+          tip: _tipValue);
 
   /// What cash covers of the bill, used to work out "balance on card".
   double get _cashPart => splitTender(due: widget.due, cash: _num(_cash), tip: _num(_card) > 0 ? 0 : _tipValue)
@@ -98,6 +114,7 @@ class _PaymentDialogState extends State<_PaymentDialog> {
 
   void _setCash(double v) => setState(() => _cash.text = v.toStringAsFixed(2));
   void _setCard(double v) => setState(() => _card.text = v <= 0 ? '' : v.toStringAsFixed(2));
+  void _setEft(double v) => setState(() => _eft.text = v <= 0 ? '' : v.toStringAsFixed(2));
 
   List<double> _notes() {
     final d = widget.due;
@@ -121,12 +138,13 @@ class _PaymentDialogState extends State<_PaymentDialog> {
       _card.clear();
       _setCash(v);
     }
+    _eft.clear();
   }
 
   @override
   Widget build(BuildContext context) {
     final r = _result;
-    final cashOnCard = round2(widget.due - _cashPart); // balance a card would need to cover
+    final cashOnCard = round2(widget.due - _cashPart - _num(_eft)); // balance a card would need to cover
     final nothing = r.payments.isEmpty && r.error == null;
     final part = !nothing && r.error == null && r.remaining > 0.005;
 
@@ -166,7 +184,7 @@ class _PaymentDialogState extends State<_PaymentDialog> {
               if (r.error != null)
                 _box(const Color(0xFFFDE7EA), Brand.red, r.error!, null)
               else if (nothing)
-                _box(const Color(0xFFF0F3FA), Brand.navy, 'Enter cash, card or both', null)
+                _box(const Color(0xFFF0F3FA), Brand.navy, 'Enter cash, card, EFT or a mix', null)
               else if (part)
                 _box(const Color(0xFFFFF4D6), const Color(0xFF7A4B00), 'Balance still to pay', money(r.remaining))
               else if (r.change > 0)
@@ -182,6 +200,7 @@ class _PaymentDialogState extends State<_PaymentDialog> {
                     style: OutlinedButton.styleFrom(minimumSize: const Size(0, 38)),
                     onPressed: () {
                       _card.clear();
+                      _eft.clear();
                       _setCash(widget.due + _tipValue);
                     },
                     child: const Text('Exact cash'),
@@ -191,6 +210,7 @@ class _PaymentDialogState extends State<_PaymentDialog> {
                       style: OutlinedButton.styleFrom(minimumSize: const Size(0, 38)),
                       onPressed: () {
                         _card.clear();
+                        _eft.clear();
                         _setCash(v);
                       },
                       child: Text('R${v.toStringAsFixed(0)}'),
@@ -210,7 +230,7 @@ class _PaymentDialogState extends State<_PaymentDialog> {
                         : () {
                             // Cash above the bill cannot be mixed with card.
                             if (_num(_cash) > widget.due) _cash.clear();
-                            _setCard(round2(widget.due - (_num(_cash) > widget.due ? 0 : _cashPart)));
+                            _setCard(round2(widget.due - _num(_eft) - (_num(_cash) > widget.due ? 0 : _cashPart)));
                           },
                     child: Text(_cashPart > 0 && cashOnCard > 0.005
                         ? 'Balance ${money(cashOnCard)} on card'
@@ -223,6 +243,48 @@ class _PaymentDialogState extends State<_PaymentDialog> {
                     child: Text('Charge ${money(_num(_card) + _tipValue)} on the card machine (includes the tip).',
                         style: const TextStyle(fontWeight: FontWeight.w700, color: Brand.navy)),
                   ),
+              ],
+              if (_eftOk) ...[
+                const SizedBox(height: 12),
+                amountField(_eft, 'EFT / bank transfer amount', focus: !_cashOk && !_cardOk),
+                const SizedBox(height: 6),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: FilledButton.tonal(
+                    style: FilledButton.styleFrom(minimumSize: const Size(0, 38)),
+                    onPressed: () {
+                      final taken = round2(_cashPart + _num(_card));
+                      _setEft(round2(max(0, widget.due - (_num(_cash) > widget.due ? 0 : taken))));
+                      if (_num(_cash) > widget.due) _cash.clear();
+                    },
+                    child: Text(_cashPart + _num(_card) > 0.005 && widget.due - _cashPart - _num(_card) > 0.005
+                        ? 'Balance ${money(round2(widget.due - _cashPart - _num(_card)))} by EFT'
+                        : 'Full amount by EFT'),
+                  ),
+                ),
+                if (_num(_eft) > 0) ...[
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: _eftRef,
+                    onChanged: (_) => setState(() {}),
+                    textCapitalization: TextCapitalization.characters,
+                    decoration: const InputDecoration(
+                        labelText: 'Bank reference (required)',
+                        isDense: true,
+                        helperText: 'The reference or name shown on the proof of payment'),
+                  ),
+                  if (_eftDetails.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: Text('Banking details to give the customer:\n$_eftDetails',
+                          style: const TextStyle(fontSize: 12, color: Brand.muted)),
+                    ),
+                  const Padding(
+                    padding: EdgeInsets.only(top: 6),
+                    child: Text('Only record this once the money has reached the account (check the proof of payment or the banking app).',
+                        style: TextStyle(fontSize: 12, color: Brand.muted)),
+                  ),
+                ],
               ],
               const SizedBox(height: 4),
               Row(children: [
