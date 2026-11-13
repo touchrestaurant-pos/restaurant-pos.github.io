@@ -490,7 +490,8 @@ class _SuppliersTabState extends State<_SuppliersTab> {
     final suppliers = _l('suppliers');
     final deliveries = _l('deliveries');
     final payments = _l('payments');
-    final owing = suppliers.fold<double>(0, (s, r) => s + n(r['owing']).toDouble());
+    final owing = suppliers.fold<double>(0, (s, r) => s + (n(r['owing']) > 0 ? n(r['owing']).toDouble() : 0));
+    final overpaid = suppliers.fold<double>(0, (s, r) => s + (n(r['owing']) < 0 ? -n(r['owing']).toDouble() : 0));
     String supName(dynamic id) => '${LocalStore.row('suppliers', id)?['name'] ?? 'Supplier'}';
     return ListView(padding: const EdgeInsets.all(20), children: [
       Row(children: [
@@ -503,6 +504,9 @@ class _SuppliersTabState extends State<_SuppliersTab> {
       ]),
       const Text('Built from posted deliveries (including VAT) minus the payments you record here.',
           style: TextStyle(color: Brand.muted, fontSize: 12)),
+      if (overpaid > 0.005)
+        Text('Paid ahead to suppliers: ${money(overpaid)} (more paid than delivered; it is not taken off what you owe other suppliers).',
+            style: const TextStyle(color: Brand.green, fontSize: 12, fontWeight: FontWeight.w600)),
       if (_loading) const LinearProgressIndicator(),
       const SizedBox(height: 8),
       Card(

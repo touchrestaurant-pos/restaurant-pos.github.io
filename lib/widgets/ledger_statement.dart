@@ -338,12 +338,12 @@ class _LedgerDialogState extends State<_LedgerDialog> {
       if (topCharges.isNotEmpty)
         RankedBars(
             title: 'Biggest ${g.chargeLabel == 'Sales' ? 'sales' : 'deliveries'}',
-            points: [for (final l in topCharges) ChartPoint('${l.date}  ${l.what}', l.charge)],
+            points: [for (final l in topCharges) ChartPoint(l.what, l.charge, detail: l.date)],
             format: (v) => money(v)),
       if (topPays.isNotEmpty)
         RankedBars(
             title: 'Biggest payments',
-            points: [for (final l in topPays) ChartPoint('${l.date}  ${l.what}', l.paid)],
+            points: [for (final l in topPays) ChartPoint(l.what, l.paid, detail: l.date)],
             format: (v) => money(v),
             colorFor: (_) => Brand.green),
     ]);

@@ -123,11 +123,19 @@ LedgerStats analyseLedger(Ledger g) {
   final open = <(DateTime, double)>[];
   final start = DateTime.tryParse(g.from);
   if (g.opening > 0.005 && start != null) open.add((start, g.opening));
-  var weighted = 0.0, settled = 0.0;
+  var weighted = 0.0, settled = 0.0, credit = 0.0;
   for (final l in g.lines) {
     final d = DateTime.tryParse(l.date);
     if (d == null) continue;
-    if (!l.muted && l.charge > 0) open.add((d, l.charge));
+    if (!l.muted && l.charge > 0) {
+      // Money paid ahead of time settles a new item straight away.
+      var amt = l.charge;
+      final used = credit < amt ? credit : amt;
+      credit -= used;
+      settled += used;
+      amt -= used;
+      if (amt > 0.005) open.add((d, amt));
+    }
     var left = l.paid;
     while (left > 0.005 && open.isNotEmpty) {
       final take = left < open.first.$2 ? left : open.first.$2;
@@ -140,13 +148,16 @@ LedgerStats analyseLedger(Ledger g) {
         open[0] = (open.first.$1, open.first.$2 - take);
       }
     }
+    if (left > 0.005) credit += left;
   }
   final end = DateTime.tryParse(g.to);
   final today = DateTime.now();
   final asAt = end == null ? today : (end.isAfter(today) ? today : end);
-  final months = start == null || end == null
-      ? 1.0
-      : ((end.difference(start).inDays + 1) / 30.4).clamp(1.0, 1000.0);
+  // Count months from the first activity, so "All time" does not divide by years of nothing.
+  final firstAt = g.lines.map((l) => DateTime.tryParse(l.date)).whereType<DateTime>().fold<DateTime?>(
+      null, (a, b) => a == null || b.isBefore(a) ? b : a);
+  final from0 = firstAt ?? start;
+  final months = from0 == null || end == null ? 1.0 : ((end.difference(from0).inDays + 1) / 30.4).clamp(1.0, 1000.0);
   return LedgerStats(
     chargeCount: charges.length,
     paymentCount: pays.length,
@@ -155,7 +166,7 @@ LedgerStats analyseLedger(Ledger g) {
     largestCharge: biggest(charges, (l) => l.charge),
     largestPayment: biggest(pays, (l) => l.paid),
     avgDaysToPay: settled > 0.005 ? weighted / settled : null,
-    oldestOpenDays: open.isEmpty ? null : asAt.difference(open.first.$1).inDays,
+    oldestOpenDays: open.isEmpty || g.closing <= 0.005 ? null : asAt.difference(open.first.$1).inDays,
     paidShare: g.totalCharges > 0.005 ? g.totalPaid / g.totalCharges : 0,
     perMonthCharge: g.totalCharges / months,
   );
