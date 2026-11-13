@@ -6,6 +6,8 @@ import '../data/accounts_repo.dart';
 import '../data/local_store.dart';
 import '../data/repo.dart';
 import '../receipt/account_docs.dart';
+import '../receipt/ledger.dart';
+import '../widgets/ledger_statement.dart';
 import '../theme.dart';
 
 const _statusNames = {'active': 'Active', 'blocked': 'Blocked', 'stopped': 'Stopped'};
@@ -441,99 +443,40 @@ class _AccountsScreenState extends State<AccountsScreen> {
   // ---- statement ----
 
   Future<void> _statement(Map<String, dynamic> a) async {
-    final now = DateTime.now();
-    var from = DateTime(now.year, now.month, 1);
-    var to = DateTime(now.year, now.month, now.day);
-    Map<String, dynamic>? st;
-    String? err;
-    bool busy = false;
-    await showDialog<void>(
-      context: context,
-      builder: (ctx) => StatefulBuilder(builder: (ctx, set) {
-        Future<void> load() async {
-          set(() {
-            busy = true;
-            err = null;
-          });
-          try {
-            st = await AccountsRepo.statement('${a['id']}', from, to);
-          } catch (e) {
-            err = AccountsRepo.message(e);
-          }
-          set(() => busy = false);
-        }
+    await showLedgerStatement(
+      context,
+      heading: '${a['name']}',
+      initialPreset: 'This month',
+      payLabel: 'Take payment',
+      onPay: (_) => _takePayment(a),
+      fileName: 'Statement-${a['account_no']}',
+      load: (from, to) async => ledgerFromAccountStatement(await AccountsRepo.statement('${a['id']}', from, to)),
+    );
+  }
 
-        Future<void> pick(bool isFrom) async {
-          final d = await showDatePicker(
-              context: ctx, initialDate: isFrom ? from : to, firstDate: DateTime(2020), lastDate: DateTime(now.year + 1));
-          if (d == null) return;
-          set(() => isFrom ? from = d : to = d);
-        }
-
-        String f(DateTime d) => '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
-        final lines = ((st?['lines'] as List?) ?? const []).map((e) => Map<String, dynamic>.from(e as Map)).toList();
-        return AlertDialog(
-          title: Text('Statement · ${a['name']}'),
-          content: SizedBox(
-            width: 560,
-            child: SingleChildScrollView(
-              child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                Wrap(spacing: 8, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
-                  OutlinedButton(onPressed: () => pick(true), child: Text('From ${f(from)}')),
-                  OutlinedButton(onPressed: () => pick(false), child: Text('To ${f(to)}')),
-                  FilledButton(onPressed: busy ? null : load, child: Text(busy ? 'Loading...' : 'Show')),
-                ]),
-                if (err != null) Padding(padding: const EdgeInsets.only(top: 8), child: Text(err!, style: const TextStyle(color: Brand.red))),
-                if (st != null) ...[
-                  const SizedBox(height: 10),
-                  Text('Opening ${money(n(st!['opening']))}   ·   Closing ${money(n(st!['closing']))}',
-                      style: const TextStyle(fontWeight: FontWeight.w800)),
-                  const SizedBox(height: 6),
-                  if (lines.isEmpty)
-                    const Text('No activity in this period.')
-                  else
-                    SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      child: DataTable(
-                        columns: const [
-                          DataColumn(label: Text('Date')),
-                          DataColumn(label: Text('What')),
-                          DataColumn(label: Text('Amount'), numeric: true),
-                          DataColumn(label: Text('Balance'), numeric: true),
-                        ],
-                        rows: [
-                          for (final l in lines)
-                            DataRow(cells: [
-                              DataCell(Text('${l['date']}')),
-                              DataCell(Text('${const {
-                                    'sale': 'Sale',
-                                    'payment': 'Payment',
-                                    'credit_note': 'Credit note',
-                                    'writeoff': 'Written off',
-                                    'writeoff_reversal': 'Write-off reversed',
-                                    'credit_refund': 'Credit paid back'
-                                  }[l['kind']] ?? l['kind']} ${l['invoice_no'] ?? l['ref'] ?? ''}')),
-                              DataCell(Text(money(n(l['amount'])))),
-                              DataCell(Text(money(n(l['running'])))),
-                            ]),
-                        ],
-                      ),
-                    ),
-                ],
-              ]),
-            ),
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close')),
-            if (st != null)
-              FilledButton.icon(
-                icon: const Icon(Icons.picture_as_pdf_outlined),
-                label: const Text('Print / save PDF'),
-                onPressed: () async => Printing.layoutPdf(name: 'Statement-${a['account_no']}', onLayout: (_) => statementPdf(st!)),
-              ),
-          ],
-        );
-      }),
+  Future<void> _printList() async {
+    final list = [..._rows]..sort((x, y) => '${x['name']}'.toLowerCase().compareTo('${y['name']}'.toLowerCase()));
+    final owed = list.fold<double>(0, (t, r) => t + n(r['balance']).toDouble());
+    final od = list.fold<double>(0, (t, r) => t + n(r['overdue']).toDouble());
+    await Printing.layoutPdf(
+      name: 'Debtors-list',
+      onLayout: (_) => partyListPdf(
+        title: 'Customer accounts (debtors)',
+        headers: const ['Customer', 'Account', 'Status', 'Terms', 'Limit', 'Overdue', 'Balance'],
+        rows: [
+          for (final r in list)
+            [
+              '${r['name']}',
+              '${r['account_no']}',
+              _statusNames['${r['status']}'] ?? '${r['status']}',
+              '${r['terms_days']} days',
+              money(n(r['credit_limit'])),
+              money(n(r['overdue'])),
+              money(n(r['balance'])),
+            ]
+        ],
+        totals: ['Total', '', '', '', '', money(od), money(owed)],
+      ),
     );
   }
 
@@ -624,6 +567,8 @@ class _AccountsScreenState extends State<AccountsScreen> {
             onPressed: () async => Printing.layoutPdf(name: 'Account-application', onLayout: (_) => applicationFormPdf()),
             icon: const Icon(Icons.description_outlined),
             label: const Text('Print application form')),
+        OutlinedButton.icon(
+            onPressed: _rows.isEmpty ? null : _printList, icon: const Icon(Icons.print_outlined), label: const Text('Print list')),
         IconButton(onPressed: _load, tooltip: 'Refresh', icon: const Icon(Icons.refresh)),
       ]),
       const SizedBox(height: 6),

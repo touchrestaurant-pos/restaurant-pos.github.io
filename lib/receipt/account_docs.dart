@@ -5,6 +5,7 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 
 import '../data/repo.dart';
+import 'ledger.dart';
 
 String _co(String k) => '${companyRow()?[k == 'name' ? ((companyRow()?['trading_name'] ?? '') == '' ? 'company_name' : 'trading_name') : k] ?? ''}'.trim();
 
@@ -25,79 +26,8 @@ pw.Widget _head(String title) {
 
 String _d(dynamic v) => '${v ?? ''}'.split('T').first;
 
-/// Statement of account for one customer.
-Future<Uint8List> statementPdf(Map<String, dynamic> st) async {
-  final a = Map<String, dynamic>.from(st['account'] as Map);
-  final lines = ((st['lines'] as List?) ?? const []).map((e) => Map<String, dynamic>.from(e as Map)).toList();
-  final age = Map<String, dynamic>.from((st['ageing'] as Map?) ?? const {});
-  const kinds = {
-    'sale': 'Sale',
-    'payment': 'Payment received',
-    'credit_note': 'Credit note',
-    'writeoff': 'Written off',
-    'writeoff_reversal': 'Write-off reversed',
-    'credit_refund': 'Credit paid back',
-  };
-  String desc(Map<String, dynamic> l) {
-    final k = kinds[l['kind']] ?? '${l['kind']}';
-    final ref = '${l['invoice_no'] ?? l['ref'] ?? ''}';
-    final m = {'cash': 'cash', 'card': 'card', 'eft': 'EFT'}[l['method']];
-    return [k, if (ref.isNotEmpty) ref, if (m != null) '($m)', if ('${l['reference'] ?? ''}'.isNotEmpty) '${l['reference']}']
-        .join(' ');
-  }
-
-  final doc = pw.Document();
-  doc.addPage(pw.MultiPage(
-    pageFormat: PdfPageFormat.a4,
-    margin: const pw.EdgeInsets.all(32),
-    build: (_) => [
-      _head('Statement of account'),
-      pw.Row(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
-        pw.Expanded(
-          child: pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
-            pw.Text('${a['name']}', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 12)),
-            if ('${a['billing_address'] ?? ''}'.isNotEmpty) pw.Text('${a['billing_address']}'),
-            if ('${a['vat_no'] ?? ''}'.isNotEmpty) pw.Text('Customer VAT no: ${a['vat_no']}'),
-          ]),
-        ),
-        pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.end, children: [
-          pw.Text('Account ${a['account_no']}'),
-          pw.Text('Period ${_d(st['from'])} to ${_d(st['to'])}'),
-          pw.Text('Terms ${a['terms_days']} days'),
-        ]),
-      ]),
-      pw.SizedBox(height: 12),
-      pw.TableHelper.fromTextArray(
-        headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 9),
-        cellStyle: const pw.TextStyle(fontSize: 9),
-        headerDecoration: const pw.BoxDecoration(color: PdfColors.grey300),
-        cellAlignments: {2: pw.Alignment.centerRight, 3: pw.Alignment.centerRight},
-        headers: ['Date', 'Description', 'Amount', 'Balance'],
-        data: [
-          ['', 'Opening balance', '', money(n(st['opening']))],
-          for (final l in lines) [_d(l['date']), desc(l), money(n(l['amount'])), money(n(l['running']))],
-          ['', 'Closing balance', '', money(n(st['closing']))],
-        ],
-      ),
-      pw.SizedBox(height: 14),
-      pw.Text('Amount owing by age', style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
-      pw.TableHelper.fromTextArray(
-        headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 9),
-        cellStyle: const pw.TextStyle(fontSize: 9),
-        cellAlignment: pw.Alignment.centerRight,
-        headers: ['0-30 days', '31-60 days', '61-90 days', 'Over 90 days'],
-        data: [
-          [money(n(age['current'])), money(n(age['d31'])), money(n(age['d61'])), money(n(age['d90']))]
-        ],
-      ),
-      pw.SizedBox(height: 10),
-      pw.Text('No interest or fees are charged on this account. Please pay within ${a['terms_days']} days of each invoice. '
-          'Tell us within 7 days if anything on this statement looks wrong. Statement date ${_d(st['as_at'])}.',
-          style: const pw.TextStyle(fontSize: 8)),
-    ],
-  ));
-  return doc.save();
-}
+/// Statement of account for one customer (same layout as a supplier statement).
+Future<Uint8List> statementPdf(Map<String, dynamic> st) => ledgerPdf(ledgerFromAccountStatement(st));
 
 /// Receipt for money received on an account.
 Future<Uint8List> accountReceiptPdf(Map<String, dynamic> r, {String? reference}) async {

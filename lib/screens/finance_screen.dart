@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:printing/printing.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../data/local_store.dart';
 import '../data/repo.dart';
+import '../data/supplier_ledger.dart';
+import '../receipt/ledger.dart';
 import '../theme.dart';
 
 SupabaseClient get _db => Supabase.instance.client;
@@ -455,92 +458,31 @@ class _SuppliersTabState extends State<_SuppliersTab> {
       ((_data?[k] as List?) ?? const []).map((e) => Map<String, dynamic>.from(e as Map)).toList();
 
   Future<void> _pay({required String supplierId, Map<String, dynamic>? delivery, double? owing}) async {
-    final balance = delivery == null ? (owing ?? 0) : n(delivery['total']).toDouble() - n(delivery['paid']).toDouble();
-    final amount = TextEditingController(text: balance > 0 ? balance.toStringAsFixed(2) : '');
-    final note = TextEditingController();
-    String method = 'eft';
-    DateTime day = DateTime.now();
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => StatefulBuilder(builder: (ctx, set) {
-        final a = double.tryParse(amount.text.replaceAll(',', '.')) ?? 0;
-        return AlertDialog(
-          title: Text(delivery == null ? 'Pay supplier' : 'Pay ${delivery['grv_no']}'),
-          content: SizedBox(
-            width: 400,
-            child: Column(mainAxisSize: MainAxisSize.min, children: [
-              TextField(
-                  controller: amount,
-                  autofocus: true,
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                  onChanged: (_) => set(() {}),
-                  decoration: const InputDecoration(labelText: 'Amount', prefixText: 'R ')),
-              const SizedBox(height: 8),
-              DropdownButtonFormField<String>(
-                initialValue: method,
-                decoration: const InputDecoration(labelText: 'How'),
-                items: const [
-                  DropdownMenuItem(value: 'eft', child: Text('EFT')),
-                  DropdownMenuItem(value: 'cash', child: Text('Cash')),
-                  DropdownMenuItem(value: 'card', child: Text('Card')),
-                  DropdownMenuItem(value: 'credit_note', child: Text('Supplier credit note (goods returned or short)')),
-                ],
-                onChanged: (v) => set(() => method = v ?? 'eft'),
-              ),
-              const SizedBox(height: 8),
-              TextField(controller: note, decoration: const InputDecoration(labelText: 'Reference / note')),
-              const SizedBox(height: 8),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: OutlinedButton.icon(
-                  icon: const Icon(Icons.calendar_today, size: 16),
-                  label: Text('Date  ${_d(day)}'),
-                  onPressed: () async {
-                    final p = await showDatePicker(
-                        context: ctx, firstDate: DateTime(day.year - 3), lastDate: DateTime.now(), initialDate: day);
-                    if (p != null) set(() => day = p);
-                  },
-                ),
-              ),
-            ]),
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-            FilledButton(onPressed: a > 0 ? () => Navigator.pop(ctx, true) : null, child: const Text('Save payment')),
-          ],
-        );
-      }),
-    );
-    if (ok != true || !mounted) return;
-    await _guard(context, () async {
-      await _db.from('supplier_payments').insert({
-        'supplier_id': supplierId,
-        'grv_id': delivery?['id'],
-        'amount': double.parse(amount.text.replaceAll(',', '.')),
-        'method': method,
-        'paid_on': _d(day),
-        'note': note.text.trim().isEmpty ? null : note.text.trim(),
-      });
-    });
+    await recordSupplierPayment(context, supplierId: supplierId, delivery: delivery, owing: owing);
     _load();
   }
 
   /// Every delivery and payment for one supplier with a running balance, oldest first.
   Future<void> _statement(Map<String, dynamic> sup) async {
     final id = sup['id'] as String;
-    await showDialog<void>(
-      context: context,
-      builder: (ctx) => _SupplierStatement(
-        supplierId: id,
-        name: '${sup['name']}',
-        onPay: (owing) async {
-          Navigator.pop(ctx);
-          await _pay(supplierId: id, owing: owing);
-          if (mounted) _statement({...sup});
-        },
+    await openSupplierStatement(context, id, '${sup['name']}', onPay: (owing) async {
+      await _pay(supplierId: id, owing: owing);
+      if (mounted) _statement(sup);
+    });
+    if (mounted) _load();
+  }
+
+  Future<void> _printList(List<Map<String, dynamic>> suppliers) async {
+    final owing = suppliers.fold<double>(0, (s, r) => s + n(r['owing']).toDouble());
+    await Printing.layoutPdf(
+      name: 'Creditors-list',
+      onLayout: (_) => partyListPdf(
+        title: 'Creditors (what we owe suppliers)',
+        headers: const ['Supplier', 'Bought', 'Paid', 'Owing'],
+        rows: [for (final r in suppliers) ['${r['name']}', money(n(r['purchased'])), money(n(r['paid'])), money(n(r['owing']))]],
+        totals: ['Total', '', '', money(owing)],
       ),
     );
-    if (mounted) _load();
   }
 
   @override
@@ -555,6 +497,7 @@ class _SuppliersTabState extends State<_SuppliersTab> {
         Expanded(
             child: Text('You owe suppliers ${money(owing)}',
                 style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: owing > 0 ? Brand.red : Brand.green))),
+        IconButton(tooltip: 'Print the creditors list', onPressed: suppliers.isEmpty ? null : () => _printList(suppliers), icon: const Icon(Icons.print_outlined)),
         IconButton(onPressed: _load, icon: const Icon(Icons.refresh)),
       ]),
       const Text('Built from posted deliveries (including VAT) minus the payments you record here.',
@@ -573,6 +516,8 @@ class _SuppliersTabState extends State<_SuppliersTab> {
                     trailing: Row(mainAxisSize: MainAxisSize.min, children: [
                       Text(money(n(s['owing'])),
                           style: TextStyle(fontWeight: FontWeight.w800, color: n(s['owing']) > 0 ? Brand.red : Brand.green)),
+                      const SizedBox(width: 8),
+                      OutlinedButton(onPressed: () => _statement(s), child: const Text('Statement')),
                       const SizedBox(width: 8),
                       OutlinedButton(
                           onPressed: () => _pay(supplierId: s['id'] as String, owing: n(s['owing']).toDouble()),
@@ -622,165 +567,5 @@ class _SuppliersTabState extends State<_SuppliersTab> {
               ]),
       ),
     ]);
-  }
-}
-
-/// One supplier's account: deliveries add to what is owed, payments and credit notes reduce it.
-class _SupplierStatement extends StatefulWidget {
-  const _SupplierStatement({required this.supplierId, required this.name, required this.onPay});
-  final String supplierId;
-  final String name;
-  final void Function(double owing) onPay;
-
-  @override
-  State<_SupplierStatement> createState() => _SupplierStatementState();
-}
-
-class _SupplierStatementState extends State<_SupplierStatement> {
-  List<Map<String, dynamic>> _rows = [];
-  double _owing = 0;
-  bool _loading = true;
-  String? _error;
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  Future<void> _load() async {
-    try {
-      final grvs = List<Map<String, dynamic>>.from(await _db
-          .from('grvs')
-          .select('id, grv_no, received_on, delivery_note, total, status, notes, created_at')
-          .eq('supplier_id', widget.supplierId)
-          .inFilter('status', ['posted', 'reversed']));
-      final pays = List<Map<String, dynamic>>.from(await _db
-          .from('supplier_payments')
-          .select('id, grv_id, amount, method, paid_on, note, created_at')
-          .eq('supplier_id', widget.supplierId));
-      final grvNo = {for (final g in grvs) g['id']: '${g['grv_no']}'};
-      final rows = <Map<String, dynamic>>[
-        for (final g in grvs)
-          {
-            'date': '${g['received_on']}',
-            'at': '${g['created_at']}',
-            'what': 'Delivery ${g['grv_no']}${g['delivery_note'] == null || '${g['delivery_note']}'.isEmpty ? '' : ' · ${g['delivery_note']}'}',
-            'charge': g['status'] == 'posted' ? n(g['total']).toDouble() : 0.0,
-            'paid': 0.0,
-            'muted': g['status'] != 'posted',
-            'tag': g['status'] == 'posted' ? '' : 'Reversed, not counted (${n(g['total']).toStringAsFixed(2)})',
-          },
-        for (final p in pays)
-          {
-            'date': '${p['paid_on']}',
-            'at': '${p['created_at']}',
-            'what': '${const {'eft': 'EFT payment', 'cash': 'Cash payment', 'card': 'Card payment', 'credit_note': 'Supplier credit note'}[p['method']] ?? p['method']}'
-                '${p['grv_id'] == null ? '' : ' · for ${grvNo[p['grv_id']] ?? 'a delivery'}'}${p['note'] == null || '${p['note']}'.isEmpty ? '' : ' · ${p['note']}'}',
-            'charge': 0.0,
-            'paid': n(p['amount']).toDouble(),
-            'muted': false,
-            'tag': '',
-          },
-      ]..sort((a, b) {
-          final c = '${a['date']}'.compareTo('${b['date']}');
-          return c != 0 ? c : '${a['at']}'.compareTo('${b['at']}');
-        });
-      var bal = 0.0;
-      for (final r in rows) {
-        bal = round2(bal + (r['charge'] as double) - (r['paid'] as double));
-        r['balance'] = bal;
-      }
-      if (!mounted) return;
-      setState(() {
-        _rows = rows;
-        _owing = bal;
-        _loading = false;
-      });
-    } on PostgrestException catch (e) {
-      if (mounted) {
-        setState(() {
-          _error = e.message;
-          _loading = false;
-        });
-      }
-    } catch (_) {
-      if (mounted) {
-        setState(() {
-          _error = 'This needs an internet connection.';
-          _loading = false;
-        });
-      }
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final charged = _rows.fold<double>(0, (s, r) => s + (r['charge'] as double));
-    final paid = _rows.fold<double>(0, (s, r) => s + (r['paid'] as double));
-    return AlertDialog(
-      title: Row(children: [
-        Expanded(child: Text(widget.name, style: const TextStyle(fontWeight: FontWeight.w800))),
-        Text(money(_owing),
-            style: TextStyle(fontWeight: FontWeight.w800, color: _owing > 0.005 ? Brand.red : Brand.green)),
-      ]),
-      content: SizedBox(
-        width: 640,
-        child: _loading
-            ? const SizedBox(height: 80, child: Center(child: CircularProgressIndicator()))
-            : _error != null
-                ? Text(_error!)
-                : Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text('Bought ${money(charged)} · paid or credited ${money(paid)} · ${_owing > 0.005 ? 'you owe ${money(_owing)}' : (_owing < -0.005 ? 'supplier owes you ${money(-_owing)}' : 'nothing owing')}',
-                        style: const TextStyle(color: Brand.muted, fontSize: 12)),
-                    const SizedBox(height: 8),
-                    Flexible(
-                      child: _rows.isEmpty
-                          ? const Padding(padding: EdgeInsets.all(16), child: Text('No deliveries or payments yet.'))
-                          : SingleChildScrollView(
-                              child: SingleChildScrollView(
-                                scrollDirection: Axis.horizontal,
-                                child: DataTable(
-                                  columnSpacing: 18,
-                                  headingRowHeight: 36,
-                                  dataRowMinHeight: 40,
-                                  dataRowMaxHeight: 56,
-                                  columns: const [
-                                    DataColumn(label: Text('Date')),
-                                    DataColumn(label: Text('What')),
-                                    DataColumn(label: Text('Bought'), numeric: true),
-                                    DataColumn(label: Text('Paid'), numeric: true),
-                                    DataColumn(label: Text('Balance'), numeric: true),
-                                  ],
-                                  rows: [
-                                    for (final r in _rows)
-                                      DataRow(cells: [
-                                        DataCell(Text('${r['date']}')),
-                                        DataCell(ConstrainedBox(
-                                            constraints: const BoxConstraints(maxWidth: 230),
-                                            child: Text(
-                                                '${r['what']}${'${r['tag']}'.isEmpty ? '' : '\n${r['tag']}'}',
-                                                style: TextStyle(
-                                                    fontSize: 13,
-                                                    color: r['muted'] == true ? Brand.muted : null,
-                                                    decoration: r['muted'] == true ? TextDecoration.lineThrough : null)))),
-                                        DataCell(Text((r['charge'] as double) > 0 ? money(r['charge']) : '')),
-                                        DataCell(Text((r['paid'] as double) > 0 ? money(r['paid']) : '')),
-                                        DataCell(Text(money(r['balance']),
-                                            style: const TextStyle(fontWeight: FontWeight.w700))),
-                                      ]),
-                                  ],
-                                ),
-                              ),
-                            ),
-                    ),
-                  ]),
-      ),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close')),
-        if (!_loading && _owing > 0.005)
-          FilledButton(onPressed: () => widget.onPay(_owing), child: Text('Pay ${money(_owing)}')),
-      ],
-    );
   }
 }

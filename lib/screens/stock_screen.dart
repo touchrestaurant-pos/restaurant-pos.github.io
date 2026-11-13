@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:printing/printing.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../data/local_store.dart';
 import '../data/repo.dart';
+import '../data/supplier_ledger.dart';
 import '../data/sync_service.dart';
+import '../receipt/ledger.dart';
 import '../theme.dart';
 import '../auth/auth_service.dart';
 import 'purchase_orders.dart';
@@ -1119,70 +1122,301 @@ class GrvEditorState extends State<GrvEditor> {
 // Suppliers
 // ============================================================================
 
-class _SuppliersTab extends StatelessWidget {
+class _SuppliersTab extends StatefulWidget {
   const _SuppliersTab();
+
+  @override
+  State<_SuppliersTab> createState() => _SuppliersTabState();
+}
+
+class _SuppliersTabState extends State<_SuppliersTab> {
+  final _search = TextEditingController();
+  String _filter = 'all';
+  Map<String, Map<String, dynamic>> _bal = {};
+  bool _loading = false;
+  String? _note;
+
+  String? get _role => AuthService.instance.role;
+  bool get _admin => _role == 'admin';
+  bool get _money => const ['admin', 'supervisor'].contains(_role);
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void dispose() {
+    _search.dispose();
+    super.dispose();
+  }
+
+  /// What is owed to each supplier (admin and supervisor only).
+  Future<void> _load() async {
+    if (!_money) return;
+    setState(() {
+      _loading = true;
+      _note = null;
+    });
+    try {
+      final d = Map<String, dynamic>.from(await _db.rpc('supplier_accounts') as Map);
+      _bal = {
+        for (final x in (d['suppliers'] as List? ?? const []))
+          '${(x as Map)['id']}': Map<String, dynamic>.from(x),
+      };
+    } on PostgrestException catch (e) {
+      _note = e.message;
+    } catch (_) {
+      _note = 'Balances need an internet connection.';
+    }
+    if (mounted) setState(() => _loading = false);
+  }
+
+  double _owing(String id) => n(_bal[id]?['owing']).toDouble();
+
+  Future<void> _printList(List<Map<String, dynamic>> list) async {
+    final total = list.fold<double>(0, (s, r) => s + _owing('${r['id']}'));
+    await Printing.layoutPdf(
+      name: 'Creditors-list',
+      onLayout: (_) => partyListPdf(
+        title: 'Suppliers (creditors)',
+        headers: const ['Supplier', 'Contact', 'Terms', 'Bought', 'Paid', 'We owe'],
+        rows: [
+          for (final r in list)
+            [
+              '${r['name']}${r['active'] == false ? ' (inactive)' : ''}',
+              [r['contact_person'], r['phone']].where((e) => '${e ?? ''}'.isNotEmpty).join(' · '),
+              r['terms_days'] == null ? '' : '${r['terms_days']} days',
+              money(n(_bal['${r['id']}']?['purchased'])),
+              money(n(_bal['${r['id']}']?['paid'])),
+              money(_owing('${r['id']}')),
+            ]
+        ],
+        totals: ['Total', '', '', '', '', money(total)],
+      ),
+    );
+  }
+
+  Future<void> _delete(Map<String, dynamic> s) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Delete ${s['name']}?'),
+        content: const Text(
+            'This removes the supplier for good. It only works for a supplier with no deliveries, payments or purchase orders. If there is any history, make the supplier inactive instead.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Keep')),
+          FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: Brand.red, foregroundColor: Colors.white),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Delete')),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    await _online(context, () => _db.from('suppliers').delete().eq('id', s['id']));
+    _load();
+  }
+
+  Widget _stat(String label, String value, Color color) => Card(
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(label, style: const TextStyle(color: Brand.muted, fontWeight: FontWeight.w600)),
+            Text(value, style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: color)),
+          ]),
+        ),
+      );
 
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
       listenable: SyncService.instance,
       builder: (context, _) {
-        final list = LocalStore.rows('suppliers').toList()
+        final all = LocalStore.rows('suppliers').toList()
           ..sort((a, b) => '${a['name']}'.toLowerCase().compareTo('${b['name']}'.toLowerCase()));
-        return ListView(padding: const EdgeInsets.all(20), children: [
-          Align(
-            alignment: Alignment.centerLeft,
-            child: FilledButton.icon(
-                onPressed: () => _edit(context, null),
-                icon: const Icon(Icons.add),
-                label: const Text('Add supplier')),
-          ),
-          const SizedBox(height: 12),
-          Card(
-            child: Column(children: [
-              for (final s in list)
-                ListTile(
-                  title: Text('${s['name']}${s['active'] == false ? ' (inactive)' : ''}',
-                      style: const TextStyle(fontWeight: FontWeight.w700)),
-                  subtitle: Text([
-                    if (('${s['contact_person'] ?? ''}').isNotEmpty) '${s['contact_person']}',
-                    if (('${s['phone'] ?? ''}').isNotEmpty) '${s['phone']}',
-                    if (('${s['email'] ?? ''}').isNotEmpty) '${s['email']}',
-                  ].join(' · ')),
-                  trailing: TextButton(onPressed: () => _edit(context, s), child: const Text('Edit')),
-                ),
+        final q = _search.text.trim().toLowerCase();
+        final shown = all.where((s) {
+          if (q.isNotEmpty && !'${s['name']} ${s['account_ref'] ?? ''} ${s['contact_person'] ?? ''}'.toLowerCase().contains(q)) return false;
+          switch (_filter) {
+            case 'owing':
+              return _owing('${s['id']}') > 0.005;
+            case 'inactive':
+              return s['active'] == false;
+          }
+          return true;
+        }).toList();
+        final owed = _bal.values.fold<double>(0, (t, r) => t + (n(r['owing']) > 0 ? n(r['owing']).toDouble() : 0));
+        final paid = _bal.values.fold<double>(0, (t, r) => t + n(r['paid']).toDouble());
+        return ListView(padding: const EdgeInsets.all(16), children: [
+          Wrap(spacing: 10, runSpacing: 10, crossAxisAlignment: WrapCrossAlignment.center, children: [
+            const Text('Suppliers (creditors)', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
+            FilledButton.icon(onPressed: () => _edit(context, null), icon: const Icon(Icons.add), label: const Text('Add supplier')),
+            if (_money)
+              OutlinedButton.icon(
+                  onPressed: all.isEmpty ? null : () => _printList(shown),
+                  icon: const Icon(Icons.print_outlined),
+                  label: const Text('Print list')),
+            IconButton(onPressed: _load, tooltip: 'Refresh', icon: const Icon(Icons.refresh)),
+          ]),
+          if (_money) ...[
+            const SizedBox(height: 10),
+            Row(children: [
+              Expanded(child: _stat('You owe suppliers', money(owed), owed > 0 ? Brand.red : Brand.green)),
+              const SizedBox(width: 10),
+              Expanded(child: _stat('Paid to suppliers', money(paid), Brand.navy)),
+              const SizedBox(width: 10),
+              Expanded(child: _stat('Suppliers', '${all.length}', Brand.navy)),
             ]),
-          ),
+          ],
+          if (_note != null)
+            Padding(padding: const EdgeInsets.only(top: 6), child: Text(_note!, style: const TextStyle(color: Brand.red))),
+          if (_loading) const Padding(padding: EdgeInsets.only(top: 6), child: LinearProgressIndicator()),
+          const SizedBox(height: 10),
+          Wrap(spacing: 8, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
+            SizedBox(
+              width: 260,
+              child: TextField(
+                controller: _search,
+                onChanged: (_) => setState(() {}),
+                decoration: const InputDecoration(prefixIcon: Icon(Icons.search), hintText: 'Search supplier', isDense: true),
+              ),
+            ),
+            for (final f in {'all': 'All', if (_money) 'owing': 'Owing', 'inactive': 'Inactive'}.entries)
+              ChoiceChip(label: Text(f.value), selected: _filter == f.key, onSelected: (_) => setState(() => _filter = f.key)),
+          ]),
+          const SizedBox(height: 10),
+          if (shown.isEmpty) const Padding(padding: EdgeInsets.all(24), child: Text('No suppliers to show.')),
+          for (final s in shown) _card(context, s),
         ]);
       },
     );
   }
 
+  Widget _card(BuildContext context, Map<String, dynamic> s) {
+    final id = '${s['id']}';
+    final owing = _owing(id);
+    final active = s['active'] != false;
+    String v(String k) => '${s[k] ?? ''}'.trim();
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            Expanded(
+              child: Wrap(spacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
+                Text(v('name'), style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+                if (v('account_ref').isNotEmpty) Text(v('account_ref'), style: const TextStyle(color: Brand.muted)),
+                Chip(
+                  label: Text(active ? 'Active' : 'Inactive', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
+                  backgroundColor: active ? Brand.green : Brand.muted,
+                  visualDensity: VisualDensity.compact,
+                ),
+              ]),
+            ),
+            if (_money && _bal.containsKey(id))
+              Text(owing < -0.005 ? 'Overpaid ${money(-owing)}' : money(owing),
+                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: owing > 0.005 ? Brand.red : Brand.green)),
+          ]),
+          const SizedBox(height: 6),
+          Text(
+              [
+                if (v('contact_person').isNotEmpty) v('contact_person'),
+                if (v('phone').isNotEmpty) v('phone'),
+                if (v('email').isNotEmpty) v('email'),
+              ].join(' · '),
+              style: const TextStyle(color: Brand.muted, fontWeight: FontWeight.w600)),
+          if (v('address').isNotEmpty || v('vat_no').isNotEmpty || v('terms_days').isNotEmpty)
+            Text(
+                [
+                  if (v('address').isNotEmpty) v('address'),
+                  if (v('vat_no').isNotEmpty) 'VAT ${v('vat_no')}',
+                  if (v('terms_days').isNotEmpty) 'terms ${v('terms_days')} days',
+                ].join(' · '),
+                style: const TextStyle(color: Brand.muted, fontSize: 12)),
+          if (_money && _bal.containsKey(id))
+            Text('Bought ${money(n(_bal[id]!['purchased']))} · paid ${money(n(_bal[id]!['paid']))}',
+                style: const TextStyle(color: Brand.muted, fontSize: 12)),
+          if (v('notes').isNotEmpty) Text(v('notes'), style: const TextStyle(color: Brand.muted, fontSize: 12, fontStyle: FontStyle.italic)),
+          const SizedBox(height: 8),
+          Wrap(spacing: 8, runSpacing: 6, children: [
+            if (_admin)
+              FilledButton.tonalIcon(
+                  onPressed: owing > 0.005
+                      ? () async {
+                          await recordSupplierPayment(context, supplierId: id, owing: owing);
+                          _load();
+                        }
+                      : null,
+                  icon: const Icon(Icons.payments_outlined),
+                  label: const Text('Pay supplier')),
+            if (_money)
+              OutlinedButton.icon(
+                  onPressed: () async {
+                    await openSupplierStatement(context, id, v('name'), onPay: _admin
+                        ? (o) async {
+                            await recordSupplierPayment(context, supplierId: id, owing: o);
+                            _load();
+                          }
+                        : null);
+                    _load();
+                  },
+                  icon: const Icon(Icons.receipt_long),
+                  label: const Text('Statement')),
+            OutlinedButton(onPressed: () => _edit(context, s), child: const Text('Edit')),
+            if (_admin)
+              TextButton(
+                  style: TextButton.styleFrom(foregroundColor: Brand.red),
+                  onPressed: () => _delete(s),
+                  child: const Text('Delete')),
+          ]),
+        ]),
+      ),
+    );
+  }
+
   Future<void> _edit(BuildContext context, Map<String, dynamic>? s) async {
-    final name = TextEditingController(text: '${s?['name'] ?? ''}');
-    final contact = TextEditingController(text: '${s?['contact_person'] ?? ''}');
-    final phone = TextEditingController(text: '${s?['phone'] ?? ''}');
-    final email = TextEditingController(text: '${s?['email'] ?? ''}');
+    final c = {
+      for (final k in ['name', 'contact_person', 'phone', 'email', 'address', 'vat_no', 'account_ref', 'terms_days', 'bank_details', 'notes'])
+        k: TextEditingController(text: '${s?[k] ?? ''}')
+    };
     bool active = s?['active'] != false;
+    Widget f(String k, String label, {TextInputType? type, int lines = 1, String? help}) => Padding(
+          padding: const EdgeInsets.only(top: 8),
+          child: TextField(
+              controller: c[k],
+              keyboardType: type,
+              minLines: lines,
+              maxLines: lines + (lines > 1 ? 2 : 0),
+              decoration: InputDecoration(labelText: label, helperText: help, isDense: true)),
+        );
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, set) => AlertDialog(
           title: Text(s == null ? 'Add supplier' : 'Edit supplier'),
           content: SizedBox(
-            width: 400,
+            width: 460,
             child: SingleChildScrollView(
               child: Column(mainAxisSize: MainAxisSize.min, children: [
-                TextField(controller: name, onChanged: (_) => set(() {}), decoration: const InputDecoration(labelText: 'Supplier name')),
-                const SizedBox(height: 8),
-                TextField(controller: contact, decoration: const InputDecoration(labelText: 'Contact person')),
-                const SizedBox(height: 8),
-                TextField(controller: phone, keyboardType: TextInputType.phone, decoration: const InputDecoration(labelText: 'Phone')),
-                const SizedBox(height: 8),
-                TextField(controller: email, keyboardType: TextInputType.emailAddress, decoration: const InputDecoration(labelText: 'Email')),
+                TextField(
+                    controller: c['name'],
+                    onChanged: (_) => set(() {}),
+                    decoration: const InputDecoration(labelText: 'Supplier name', isDense: true)),
+                f('contact_person', 'Contact person'),
+                f('phone', 'Phone', type: TextInputType.phone),
+                f('email', 'Email', type: TextInputType.emailAddress),
+                f('address', 'Address', lines: 2),
+                f('vat_no', 'Supplier VAT number'),
+                f('account_ref', 'Our account number with them'),
+                f('terms_days', 'Days we have to pay', type: TextInputType.number, help: 'For example 30'),
+                f('bank_details', 'Their banking details', lines: 2),
+                f('notes', 'Notes', lines: 2),
                 SwitchListTile(
                     contentPadding: EdgeInsets.zero,
                     title: const Text('Active'),
+                    subtitle: const Text('Switch off for a supplier you no longer use. Their history stays.'),
                     value: active,
                     onChanged: (v) => set(() => active = v)),
               ]),
@@ -1191,19 +1425,26 @@ class _SuppliersTab extends StatelessWidget {
           actions: [
             TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
             FilledButton(
-                onPressed: name.text.trim().isEmpty ? null : () => Navigator.pop(ctx, true),
+                onPressed: c['name']!.text.trim().isEmpty ? null : () => Navigator.pop(ctx, true),
                 child: const Text('Save')),
           ],
         ),
       ),
     );
     if (ok != true || !context.mounted) return;
-    String? clean(TextEditingController c) => c.text.trim().isEmpty ? null : c.text.trim();
+    String? clean(String k) => c[k]!.text.trim().isEmpty ? null : c[k]!.text.trim();
+    final days = int.tryParse(c['terms_days']!.text.trim());
     final row = {
-      'name': name.text.trim(),
-      'contact_person': clean(contact),
-      'phone': clean(phone),
-      'email': clean(email),
+      'name': c['name']!.text.trim(),
+      'contact_person': clean('contact_person'),
+      'phone': clean('phone'),
+      'email': clean('email'),
+      'address': clean('address'),
+      'vat_no': clean('vat_no'),
+      'account_ref': clean('account_ref'),
+      'terms_days': days,
+      'bank_details': clean('bank_details'),
+      'notes': clean('notes'),
       'active': active,
     };
     await _online(context, () async {
@@ -1213,5 +1454,6 @@ class _SuppliersTab extends StatelessWidget {
         await _db.from('suppliers').update(row).eq('id', s['id']);
       }
     });
+    _load();
   }
 }
