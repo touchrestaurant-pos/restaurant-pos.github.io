@@ -915,7 +915,7 @@ class _ReceiptDialogState extends State<_ReceiptDialog> {
 
 /// On-screen look of the slip.
 class ReceiptPaper extends StatelessWidget {
-  const ReceiptPaper({required this.r});
+  const ReceiptPaper({super.key, required this.r});
   final ReceiptData r;
 
   @override
@@ -977,9 +977,9 @@ class ReceiptPaper extends StatelessWidget {
 Widget _slipDivider(String kind) {
   switch (kind) {
     case 'dashed':
-      return const Text('- ' * 120, maxLines: 1, overflow: TextOverflow.clip, softWrap: false, style: TextStyle(fontFamily: 'monospace', fontSize: 11, height: 1));
+      return Text('- ' * 120, maxLines: 1, overflow: TextOverflow.clip, softWrap: false, style: const TextStyle(fontFamily: 'monospace', fontSize: 11, height: 1));
     case 'dotted':
-      return const Text('. ' * 120, maxLines: 1, overflow: TextOverflow.clip, softWrap: false, style: TextStyle(fontFamily: 'monospace', fontSize: 11, height: 1));
+      return Text('. ' * 120, maxLines: 1, overflow: TextOverflow.clip, softWrap: false, style: const TextStyle(fontFamily: 'monospace', fontSize: 11, height: 1));
     case 'double':
       return const Column(children: [Divider(height: 1, thickness: 1), SizedBox(height: 2), Divider(height: 1, thickness: 1)]);
     default:
