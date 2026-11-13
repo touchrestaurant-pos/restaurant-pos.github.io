@@ -525,6 +525,24 @@ class _SuppliersTabState extends State<_SuppliersTab> {
     _load();
   }
 
+  /// Every delivery and payment for one supplier with a running balance, oldest first.
+  Future<void> _statement(Map<String, dynamic> sup) async {
+    final id = sup['id'] as String;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => _SupplierStatement(
+        supplierId: id,
+        name: '${sup['name']}',
+        onPay: (owing) async {
+          Navigator.pop(ctx);
+          await _pay(supplierId: id, owing: owing);
+          if (mounted) _statement({...sup});
+        },
+      ),
+    );
+    if (mounted) _load();
+  }
+
   @override
   Widget build(BuildContext context) {
     final suppliers = _l('suppliers');
@@ -549,8 +567,9 @@ class _SuppliersTabState extends State<_SuppliersTab> {
             : Column(children: [
                 for (final s in suppliers)
                   ListTile(
+                    onTap: () => _statement(s),
                     title: Text('${s['name']}', style: const TextStyle(fontWeight: FontWeight.w700)),
-                    subtitle: Text('Bought ${money(n(s['purchased']))} · paid ${money(n(s['paid']))}'),
+                    subtitle: Text('Tap to see the history · bought ${money(n(s['purchased']))} · paid ${money(n(s['paid']))}'),
                     trailing: Row(mainAxisSize: MainAxisSize.min, children: [
                       Text(money(n(s['owing'])),
                           style: TextStyle(fontWeight: FontWeight.w800, color: n(s['owing']) > 0 ? Brand.red : Brand.green)),
@@ -603,5 +622,165 @@ class _SuppliersTabState extends State<_SuppliersTab> {
               ]),
       ),
     ]);
+  }
+}
+
+/// One supplier's account: deliveries add to what is owed, payments and credit notes reduce it.
+class _SupplierStatement extends StatefulWidget {
+  const _SupplierStatement({required this.supplierId, required this.name, required this.onPay});
+  final String supplierId;
+  final String name;
+  final void Function(double owing) onPay;
+
+  @override
+  State<_SupplierStatement> createState() => _SupplierStatementState();
+}
+
+class _SupplierStatementState extends State<_SupplierStatement> {
+  List<Map<String, dynamic>> _rows = [];
+  double _owing = 0;
+  bool _loading = true;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final grvs = List<Map<String, dynamic>>.from(await _db
+          .from('grvs')
+          .select('id, grv_no, received_on, delivery_note, total, status, notes, created_at')
+          .eq('supplier_id', widget.supplierId)
+          .inFilter('status', ['posted', 'reversed']));
+      final pays = List<Map<String, dynamic>>.from(await _db
+          .from('supplier_payments')
+          .select('id, grv_id, amount, method, paid_on, note, created_at')
+          .eq('supplier_id', widget.supplierId));
+      final grvNo = {for (final g in grvs) g['id']: '${g['grv_no']}'};
+      final rows = <Map<String, dynamic>>[
+        for (final g in grvs)
+          {
+            'date': '${g['received_on']}',
+            'at': '${g['created_at']}',
+            'what': 'Delivery ${g['grv_no']}${g['delivery_note'] == null || '${g['delivery_note']}'.isEmpty ? '' : ' · ${g['delivery_note']}'}',
+            'charge': g['status'] == 'posted' ? n(g['total']).toDouble() : 0.0,
+            'paid': 0.0,
+            'muted': g['status'] != 'posted',
+            'tag': g['status'] == 'posted' ? '' : 'Reversed, not counted (${n(g['total']).toStringAsFixed(2)})',
+          },
+        for (final p in pays)
+          {
+            'date': '${p['paid_on']}',
+            'at': '${p['created_at']}',
+            'what': '${const {'eft': 'EFT payment', 'cash': 'Cash payment', 'card': 'Card payment', 'credit_note': 'Supplier credit note'}[p['method']] ?? p['method']}'
+                '${p['grv_id'] == null ? '' : ' · for ${grvNo[p['grv_id']] ?? 'a delivery'}'}${p['note'] == null || '${p['note']}'.isEmpty ? '' : ' · ${p['note']}'}',
+            'charge': 0.0,
+            'paid': n(p['amount']).toDouble(),
+            'muted': false,
+            'tag': '',
+          },
+      ]..sort((a, b) {
+          final c = '${a['date']}'.compareTo('${b['date']}');
+          return c != 0 ? c : '${a['at']}'.compareTo('${b['at']}');
+        });
+      var bal = 0.0;
+      for (final r in rows) {
+        bal = round2(bal + (r['charge'] as double) - (r['paid'] as double));
+        r['balance'] = bal;
+      }
+      if (!mounted) return;
+      setState(() {
+        _rows = rows;
+        _owing = bal;
+        _loading = false;
+      });
+    } on PostgrestException catch (e) {
+      if (mounted) {
+        setState(() {
+          _error = e.message;
+          _loading = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _error = 'This needs an internet connection.';
+          _loading = false;
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final charged = _rows.fold<double>(0, (s, r) => s + (r['charge'] as double));
+    final paid = _rows.fold<double>(0, (s, r) => s + (r['paid'] as double));
+    return AlertDialog(
+      title: Row(children: [
+        Expanded(child: Text(widget.name, style: const TextStyle(fontWeight: FontWeight.w800))),
+        Text(money(_owing),
+            style: TextStyle(fontWeight: FontWeight.w800, color: _owing > 0.005 ? Brand.red : Brand.green)),
+      ]),
+      content: SizedBox(
+        width: 640,
+        child: _loading
+            ? const SizedBox(height: 80, child: Center(child: CircularProgressIndicator()))
+            : _error != null
+                ? Text(_error!)
+                : Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text('Bought ${money(charged)} · paid or credited ${money(paid)} · ${_owing > 0.005 ? 'you owe ${money(_owing)}' : (_owing < -0.005 ? 'supplier owes you ${money(-_owing)}' : 'nothing owing')}',
+                        style: const TextStyle(color: Brand.muted, fontSize: 12)),
+                    const SizedBox(height: 8),
+                    Flexible(
+                      child: _rows.isEmpty
+                          ? const Padding(padding: EdgeInsets.all(16), child: Text('No deliveries or payments yet.'))
+                          : SingleChildScrollView(
+                              child: SingleChildScrollView(
+                                scrollDirection: Axis.horizontal,
+                                child: DataTable(
+                                  columnSpacing: 18,
+                                  headingRowHeight: 36,
+                                  dataRowMinHeight: 40,
+                                  dataRowMaxHeight: 56,
+                                  columns: const [
+                                    DataColumn(label: Text('Date')),
+                                    DataColumn(label: Text('What')),
+                                    DataColumn(label: Text('Bought'), numeric: true),
+                                    DataColumn(label: Text('Paid'), numeric: true),
+                                    DataColumn(label: Text('Balance'), numeric: true),
+                                  ],
+                                  rows: [
+                                    for (final r in _rows)
+                                      DataRow(cells: [
+                                        DataCell(Text('${r['date']}')),
+                                        DataCell(ConstrainedBox(
+                                            constraints: const BoxConstraints(maxWidth: 230),
+                                            child: Text(
+                                                '${r['what']}${'${r['tag']}'.isEmpty ? '' : '\n${r['tag']}'}',
+                                                style: TextStyle(
+                                                    fontSize: 13,
+                                                    color: r['muted'] == true ? Brand.muted : null,
+                                                    decoration: r['muted'] == true ? TextDecoration.lineThrough : null)))),
+                                        DataCell(Text((r['charge'] as double) > 0 ? money(r['charge']) : '')),
+                                        DataCell(Text((r['paid'] as double) > 0 ? money(r['paid']) : '')),
+                                        DataCell(Text(money(r['balance']),
+                                            style: const TextStyle(fontWeight: FontWeight.w700))),
+                                      ]),
+                                  ],
+                                ),
+                              ),
+                            ),
+                    ),
+                  ]),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close')),
+        if (!_loading && _owing > 0.005)
+          FilledButton(onPressed: () => widget.onPay(_owing), child: Text('Pay ${money(_owing)}')),
+      ],
+    );
   }
 }
