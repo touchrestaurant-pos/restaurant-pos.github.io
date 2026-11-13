@@ -96,6 +96,52 @@ class ReceiptData {
   }
 }
 
+/// How the owner wants the slip laid out (Settings > Receipt layout). Stored in company_settings.receipt_style.
+class ReceiptStyle {
+  const ReceiptStyle({
+    this.fontScale = 1.0,
+    this.logo = 'medium',
+    this.showAddress = true,
+    this.showPhone = true,
+    this.showEmail = true,
+    this.showReg = false,
+    this.divider = 'solid',
+    this.headerAlign = 0,
+  });
+  final double fontScale;
+
+  /// hide, small, medium, large
+  final String logo;
+  final bool showAddress, showPhone, showEmail, showReg;
+
+  /// solid, dashed, dotted, double
+  final String divider;
+
+  /// -1 left, 0 centre, 1 right (name and contact lines at the top)
+  final int headerAlign;
+
+  static ReceiptStyle of(Map<String, dynamic>? company) {
+    final raw = company?['receipt_style'];
+    final m = raw is Map ? raw : const {};
+    bool b(String k, bool d) => m[k] is bool ? m[k] as bool : d;
+    String sOf(String k, String d, List<String> ok) => ok.contains('${m[k]}') ? '${m[k]}' : d;
+    final fs = m['font_scale'];
+    return ReceiptStyle(
+      fontScale: fs is num ? fs.toDouble().clamp(0.7, 1.6) : 1.0,
+      logo: sOf('logo', 'medium', const ['hide', 'small', 'medium', 'large']),
+      showAddress: b('show_address', true),
+      showPhone: b('show_phone', true),
+      showEmail: b('show_email', true),
+      showReg: b('show_reg', false),
+      divider: sOf('divider', 'solid', const ['solid', 'dashed', 'dotted', 'double']),
+      headerAlign: m['header_align'] is int ? (m['header_align'] as int).clamp(-1, 1) : 0,
+    );
+  }
+
+  /// Logo height and width on the paper, in points.
+  double get logoSize => switch (logo) { 'small' => 30, 'large' => 70, _ => 46 };
+}
+
 /// One line of a receipt. The screen, the PDF and the email are all drawn from
 /// the same list, so they always say the same thing.
 class RLine {
@@ -263,12 +309,19 @@ List<RLine> receiptLines(ReceiptData r) {
   final showNotes = c['show_notes_on_slip'] == true;
   final showVat = c['show_vat_on_slip'] != false;
   final footer = '${c['receipt_footer'] ?? ''}'.trim();
+  final st = ReceiptStyle.of(c);
   final lines = <RLine>[
-    RLine.center(r.companyName, size: 13, bold: true),
+    RLine.center(r.companyName, size: 13, bold: true, align: st.headerAlign),
     for (final k in ['company_name', 'address', 'phone', 'email'])
-      if ('${c[k] ?? ''}'.trim().isNotEmpty && !(k == 'company_name' && '${c[k]}'.trim() == r.companyName))
-        RLine.center(k == 'phone' ? 'Tel ${c[k]}' : '${c[k]}'.trim(), size: 8),
-    if (taxInvoice) RLine.center('VAT no. ${r.vatNumber}', size: 8),
+      if ('${c[k] ?? ''}'.trim().isNotEmpty &&
+          !(k == 'company_name' && '${c[k]}'.trim() == r.companyName) &&
+          !(k == 'address' && !st.showAddress) &&
+          !(k == 'phone' && !st.showPhone) &&
+          !(k == 'email' && !st.showEmail))
+        RLine.center(k == 'phone' ? 'Tel ${c[k]}' : '${c[k]}'.trim(), size: 8, align: st.headerAlign),
+    if (st.showReg && '${c['reg_number'] ?? ''}'.trim().isNotEmpty)
+      RLine.center('Reg no. ${'${c['reg_number']}'.trim()}', size: 8, align: st.headerAlign),
+    if (taxInvoice) RLine.center('VAT no. ${r.vatNumber}', size: 8, align: st.headerAlign),
     const RLine.divider(),
     RLine.center(taxInvoice ? 'TAX INVOICE' : 'RECEIPT', size: 11, bold: true),
     if (r.invoiceNo != null)
@@ -364,8 +417,10 @@ Future<Uint8List> receiptPdf(ReceiptData r) async {
     }
   }
   final small = slipPaperMm() == 58;
+  final style = ReceiptStyle.of(c);
+  if (style.logo == 'hide') logo = null;
   pw.TextStyle t(double size, {bool bold = false, bool italic = false}) => pw.TextStyle(
-      fontSize: small ? size * 0.85 : size,
+      fontSize: (small ? size * 0.85 : size) * style.fontScale,
       fontWeight: bold ? pw.FontWeight.bold : pw.FontWeight.normal,
       fontStyle: italic ? pw.FontStyle.italic : pw.FontStyle.normal);
 
@@ -373,7 +428,19 @@ Future<Uint8List> receiptPdf(ReceiptData r) async {
     switch (l.kind) {
       case 'divider':
         return pw.Padding(
-            padding: const pw.EdgeInsets.symmetric(vertical: 4), child: pw.Divider(thickness: 0.6, height: 1));
+            padding: const pw.EdgeInsets.symmetric(vertical: 4),
+            child: style.divider == 'double'
+                ? pw.Column(children: [
+                    pw.Divider(thickness: 0.6, height: 1),
+                    pw.SizedBox(height: 2),
+                    pw.Divider(thickness: 0.6, height: 1),
+                  ])
+                : pw.Divider(
+                    thickness: 0.6,
+                    height: 1,
+                    borderStyle: style.divider == 'dashed'
+                        ? pw.BorderStyle.dashed
+                        : (style.divider == 'dotted' ? pw.BorderStyle.dotted : pw.BorderStyle.solid)));
       case 'gap':
         return pw.SizedBox(height: 4);
       case 'row':
@@ -406,7 +473,7 @@ Future<Uint8List> receiptPdf(ReceiptData r) async {
       // roll's fixed page length. A minimum length avoids that.
       constraints: const pw.BoxConstraints(minHeight: 70 * PdfPageFormat.mm),
       child: pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.stretch, children: [
-        if (logo != null) pw.Center(child: pw.Image(logo, width: 46, height: 46, fit: pw.BoxFit.contain)),
+        if (logo != null) pw.Center(child: pw.Image(logo, width: style.logoSize, height: style.logoSize, fit: pw.BoxFit.contain)),
         if (logo != null) pw.SizedBox(height: 4),
         for (final l in receiptLines(r)) draw(l),
         pw.SizedBox(height: 6),
@@ -782,7 +849,7 @@ class _ReceiptDialogState extends State<_ReceiptDialog> {
       title: Text(r.invoiceNo ?? 'Receipt #${r.ref}'),
       content: SizedBox(
         width: 360,
-        child: SingleChildScrollView(child: _ReceiptPaper(r: r)),
+        child: SingleChildScrollView(child: ReceiptPaper(r: r)),
       ),
       actionsAlignment: MainAxisAlignment.spaceBetween,
       actionsOverflowButtonSpacing: 6,
@@ -847,20 +914,22 @@ class _ReceiptDialogState extends State<_ReceiptDialog> {
 }
 
 /// On-screen look of the slip.
-class _ReceiptPaper extends StatelessWidget {
-  const _ReceiptPaper({required this.r});
+class ReceiptPaper extends StatelessWidget {
+  const ReceiptPaper({required this.r});
   final ReceiptData r;
 
   @override
   Widget build(BuildContext context) {
     const mono = TextStyle(fontFamily: 'monospace', fontSize: 13, height: 1.35);
+    final style = ReceiptStyle.of(r.company);
     TextStyle st(RLine l) => mono.copyWith(
         fontStyle: l.italic ? FontStyle.italic : null,
-        fontWeight: l.bold ? FontWeight.w800 : null, fontSize: l.size <= 0 ? 13 : (l.size + 4).clamp(10, 18).toDouble());
+        fontWeight: l.bold ? FontWeight.w800 : null,
+        fontSize: (l.size <= 0 ? 13 : (l.size + 4).clamp(10, 18).toDouble()) * style.fontScale);
     Widget draw(RLine l) {
       switch (l.kind) {
         case 'divider':
-          return const Padding(padding: EdgeInsets.symmetric(vertical: 6), child: Divider(height: 1, thickness: 1));
+          return Padding(padding: const EdgeInsets.symmetric(vertical: 6), child: _slipDivider(style.divider));
         case 'gap':
           return const SizedBox(height: 6);
         case 'row':
@@ -893,12 +962,27 @@ class _ReceiptPaper extends StatelessWidget {
           border: Border.all(color: Brand.border),
           boxShadow: const [BoxShadow(color: Color(0x14000000), blurRadius: 6, offset: Offset(0, 2))]),
       child: Column(children: [
-        if (logo.isNotEmpty)
+        if (logo.isNotEmpty && style.logo != 'hide')
           Padding(
               padding: const EdgeInsets.only(bottom: 6),
-              child: Image.network(logo, width: 52, height: 52, errorBuilder: (_, __, ___) => const SizedBox())),
+              child: Image.network(logo,
+                  width: style.logoSize * 1.15, height: style.logoSize * 1.15, errorBuilder: (_, __, ___) => const SizedBox())),
         for (final l in receiptLines(r)) draw(l),
       ]),
     );
+  }
+}
+
+/// A divider line as the owner chose it (solid, dashed, dotted or double).
+Widget _slipDivider(String kind) {
+  switch (kind) {
+    case 'dashed':
+      return const Text('- ' * 120, maxLines: 1, overflow: TextOverflow.clip, softWrap: false, style: TextStyle(fontFamily: 'monospace', fontSize: 11, height: 1));
+    case 'dotted':
+      return const Text('. ' * 120, maxLines: 1, overflow: TextOverflow.clip, softWrap: false, style: TextStyle(fontFamily: 'monospace', fontSize: 11, height: 1));
+    case 'double':
+      return const Column(children: [Divider(height: 1, thickness: 1), SizedBox(height: 2), Divider(height: 1, thickness: 1)]);
+    default:
+      return const Divider(height: 1, thickness: 1);
   }
 }

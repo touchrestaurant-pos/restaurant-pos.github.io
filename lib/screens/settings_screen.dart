@@ -38,6 +38,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _cash = true;
   bool _card = true;
   bool _eft = false;
+  Map<String, dynamic> _style = {};
   bool _showVat = true;
   bool _showNotes = false;
   bool _busy = false;
@@ -58,6 +59,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _cash = row['accept_cash'] != false;
     _card = row['accept_card_manual'] != false;
     _eft = row['accept_eft'] == true;
+    _style = row['receipt_style'] is Map ? Map<String, dynamic>.from(row['receipt_style'] as Map) : {};
     _showVat = row['show_vat_on_slip'] != false;
     _showNotes = row['show_notes_on_slip'] == true;
   }
@@ -99,6 +101,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       'accept_cash': _cash,
       'accept_card_manual': _card,
       'accept_eft': _eft,
+      'receipt_style': _style,
       'show_vat_on_slip': _showVat,
       'show_notes_on_slip': _showNotes,
       'table_count': tables,
@@ -229,6 +232,89 @@ class _SettingsScreenState extends State<SettingsScreen> {
         btn('Right', '[r]', 'Align right', replaces: const ['[l]', '[c]']),
         btn('Line', '[line]', 'Make this line a divider'),
       ]),
+    ]);
+  }
+
+  void _setStyle(String k, Object v) => setState(() => _style = {..._style, k: v});
+
+  /// A sample sale drawn with the real slip code, using what is typed on this page.
+  ReceiptData _sampleReceipt() {
+    final base = Map<String, dynamic>.from(companyRow() ?? {});
+    for (final k in _textFields) {
+      base[k] = _c[k]!.text.trim();
+    }
+    base['show_vat_on_slip'] = _showVat;
+    base['receipt_style'] = _style;
+    final now = DateTime.now().toUtc().toIso8601String();
+    return ReceiptData(
+      order: {
+        'order_ref': '0042',
+        'paid': true,
+        'status': 'collected',
+        'total': 141.80,
+        'subtotal': 123.30,
+        'vat': 18.50,
+        'discount': 0,
+        'invoice_no': 123,
+        'created_at': now,
+        'order_type': 'eat_in',
+        'table_no': '4',
+      },
+      items: [
+        {'qty': 2, 'name': 'Spicy Chicken Burger', 'unit_price': 54.90, 'vat_type': 'standard'},
+        {'qty': 1, 'name': 'Large Chips', 'unit_price': 32.00, 'vat_type': 'standard'},
+      ],
+      payments: [
+        {'method': 'cash', 'amount': 141.80, 'tip': 0, 'tendered': 150, 'change_given': 8.20, 'created_at': now},
+      ],
+      company: base,
+    );
+  }
+
+  Widget _layoutEditor() {
+    final st = ReceiptStyle.of({'receipt_style': _style});
+    Widget label(String t) => Padding(
+        padding: const EdgeInsets.only(top: 14, bottom: 6),
+        child: Text(t, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13)));
+    Widget seg<T>(T value, List<(T, String)> opts, void Function(T) on) => SegmentedButton<T>(
+          showSelectedIcon: false,
+          style: const ButtonStyle(visualDensity: VisualDensity.compact),
+          segments: [for (final o in opts) ButtonSegment(value: o.$1, label: Text(o.$2))],
+          selected: {value},
+          onSelectionChanged: (v) => on(v.first),
+        );
+    final scale = const [0.85, 1.0, 1.15, 1.3].reduce((a, b) => (a - st.fontScale).abs() <= (b - st.fontScale).abs() ? a : b);
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      const Text('Receipt layout', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+      const SizedBox(height: 2),
+      const Text('The preview above changes as you pick. Remember to press Save changes.',
+          style: TextStyle(color: Brand.muted, fontSize: 12)),
+      label('Text size'),
+      seg<double>(scale, const [(0.85, 'Small'), (1.0, 'Normal'), (1.15, 'Large'), (1.3, 'Extra large')],
+          (v) => _setStyle('font_scale', v)),
+      label('Logo'),
+      seg<String>(st.logo, const [('hide', 'Hidden'), ('small', 'Small'), ('medium', 'Medium'), ('large', 'Large')],
+          (v) => _setStyle('logo', v)),
+      label('Name and contact lines'),
+      seg<int>(st.headerAlign, const [(-1, 'Left'), (0, 'Centre'), (1, 'Right')], (v) => _setStyle('header_align', v)),
+      label('Show at the top of the slip'),
+      Wrap(spacing: 8, runSpacing: 6, children: [
+        FilterChip(label: const Text('Address'), selected: st.showAddress, onSelected: (v) => _setStyle('show_address', v)),
+        FilterChip(label: const Text('Phone'), selected: st.showPhone, onSelected: (v) => _setStyle('show_phone', v)),
+        FilterChip(label: const Text('Email'), selected: st.showEmail, onSelected: (v) => _setStyle('show_email', v)),
+        FilterChip(label: const Text('Company reg. no.'), selected: st.showReg, onSelected: (v) => _setStyle('show_reg', v)),
+      ]),
+      const SizedBox(height: 4),
+      const Text('The VAT number shows whenever "Show our VAT number on the customer slip" is on, because a tax invoice must carry it.',
+          style: TextStyle(color: Brand.muted, fontSize: 12)),
+      label('Divider lines'),
+      seg<String>(st.divider, const [('solid', 'Solid'), ('dashed', 'Dashed'), ('dotted', 'Dotted'), ('double', 'Double')],
+          (v) => _setStyle('divider', v)),
+      const SizedBox(height: 10),
+      Align(
+        alignment: Alignment.centerLeft,
+        child: TextButton(onPressed: () => setState(() => _style = {}), child: const Text('Reset layout to default')),
+      ),
     ]);
   }
 
@@ -398,9 +484,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
             const Text('Receipt preview',
                 style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
             const SizedBox(height: 12),
-            Center(child: _ReceiptPreview(values: _preview())),
+            Center(child: SizedBox(width: 340, child: ReceiptPaper(r: _sampleReceipt()))),
           ],
         ),
+      ),
+    );
+
+    final layout = Card(
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: _layoutEditor(),
       ),
     );
 
@@ -441,12 +534,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 const SizedBox(width: 16),
                 SizedBox(
                   width: 400,
-                  child: Column(children: [payments, const SizedBox(height: 16), receipt]),
+                  child: Column(children: [payments, const SizedBox(height: 16), receipt, const SizedBox(height: 16), layout]),
                 ),
               ],
             );
           }
-          return Column(children: [details, const SizedBox(height: 16), payments, const SizedBox(height: 16), receipt]);
+          return Column(children: [details, const SizedBox(height: 16), payments, const SizedBox(height: 16), receipt, const SizedBox(height: 16), layout]);
         }),
         const SizedBox(height: 16),
         Card(
@@ -483,83 +576,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
         const SizedBox(height: 16),
         const AdminTools(),
       ],
-    );
-  }
-
-  Map<String, String> _preview() => {
-        for (final k in _textFields) k: _c[k]!.text.trim(),
-      };
-}
-
-class _ReceiptPreview extends StatelessWidget {
-  const _ReceiptPreview({required this.values});
-  final Map<String, String> values;
-
-  @override
-  Widget build(BuildContext context) {
-    const small = TextStyle(fontSize: 12, color: Brand.muted);
-    final name = values['company_name']!.isEmpty ? 'Your company' : values['company_name']!;
-    final contact = [
-      if (values['phone']!.isNotEmpty) 'Tel ${values['phone']}',
-      if (values['vat_number']!.isNotEmpty) 'VAT ${values['vat_number']}',
-    ].join(' · ');
-    Widget row(String l, String r, {bool bold = false}) => Padding(
-          padding: const EdgeInsets.only(top: 3),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(l,
-                  style: TextStyle(
-                      fontSize: bold ? 14 : 12,
-                      fontWeight: bold ? FontWeight.w800 : FontWeight.w400)),
-              Text(r,
-                  style: TextStyle(
-                      fontSize: bold ? 14 : 12,
-                      fontWeight: bold ? FontWeight.w800 : FontWeight.w400)),
-            ],
-          ),
-        );
-    return Container(
-      width: 260,
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border.all(color: Brand.border),
-      ),
-      child: Column(
-        children: [
-          const BrandMark(size: 44),
-          const SizedBox(height: 8),
-          Text(name,
-              textAlign: TextAlign.center,
-              style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14)),
-          if (values['address']!.isNotEmpty)
-            Text(values['address']!, textAlign: TextAlign.center, style: small),
-          if (contact.isNotEmpty) Text(contact, textAlign: TextAlign.center, style: small),
-          const Divider(height: 20),
-          row('2× Spicy Chicken Burger', '109.80'),
-          row('1× Large Chips', '32.00'),
-          const Divider(height: 20),
-          row('Total', 'R141.80', bold: true),
-          row('Paid: Cash', 'Change R8.20'),
-          if (values['receipt_footer']!.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            for (final l in footerLines(values['receipt_footer']!))
-              l.kind == 'divider'
-                  ? const Divider(height: 14)
-                  : l.kind == 'gap'
-                      ? const SizedBox(height: 6)
-                      : SizedBox(
-                          width: double.infinity,
-                          child: Text(l.left,
-                              textAlign: l.align < 0 ? TextAlign.left : (l.align > 0 ? TextAlign.right : TextAlign.center),
-                              style: small.copyWith(
-                                  fontSize: l.size + 4,
-                                  fontWeight: l.bold ? FontWeight.w800 : null,
-                                  fontStyle: l.italic ? FontStyle.italic : null))),
-          ],
-        ],
-      ),
     );
   }
 }
