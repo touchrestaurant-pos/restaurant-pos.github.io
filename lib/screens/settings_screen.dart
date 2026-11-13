@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../data/local_store.dart';
 import '../data/repo.dart';
 import '../data/sync_service.dart';
+import '../receipt/receipt_service.dart';
 import '../theme.dart';
 import '../widgets/brand_mark.dart';
 import 'admin_tools.dart';
@@ -169,6 +170,64 @@ class _SettingsScreenState extends State<SettingsScreen> {
         decoration: InputDecoration(labelText: label, isDense: true),
       );
 
+  /// Puts [tag] at the start of the line the cursor is on, or takes it off if it is already there.
+  void _toggleTag(String tag, {List<String> replaces = const []}) {
+    final c = _c['receipt_footer']!;
+    final text = c.text;
+    var pos = c.selection.isValid ? c.selection.baseOffset.clamp(0, text.length) : text.length;
+    final start = pos == 0 ? 0 : text.lastIndexOf('\n', pos - 1) + 1;
+    var end = text.indexOf('\n', start);
+    if (end < 0) end = text.length;
+    var line = text.substring(start, end);
+    final lead = RegExp(r'^\s*((\[(b|i|l|c|r|big|small|line)\])*)').firstMatch(line)!;
+    var tags = lead.group(1)!;
+    final body = line.substring(lead.end);
+    if (tags.contains(tag)) {
+      tags = tags.replaceAll(tag, '');
+    } else {
+      for (final r in replaces) {
+        tags = tags.replaceAll(r, '');
+      }
+      tags += tag;
+    }
+    final next = text.replaceRange(start, end, '$tags$body');
+    c.value = TextEditingValue(text: next, selection: TextSelection.collapsed(offset: start + tags.length + body.length));
+    setState(() {});
+  }
+
+  Widget _footerEditor() {
+    Widget btn(String label, String tag, String tip, {List<String> replaces = const [], FontWeight? w, FontStyle? st}) => Tooltip(
+          message: tip,
+          child: OutlinedButton(
+            style: OutlinedButton.styleFrom(minimumSize: const Size(40, 36), padding: const EdgeInsets.symmetric(horizontal: 10)),
+            onPressed: () => _toggleTag(tag, replaces: replaces),
+            child: Text(label, style: TextStyle(fontWeight: w, fontStyle: st)),
+          ),
+        );
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      TextField(
+        controller: _c['receipt_footer'],
+        minLines: 2,
+        maxLines: 6,
+        onChanged: (_) => setState(() {}),
+        decoration: const InputDecoration(
+            labelText: 'Receipt footer message', isDense: true, alignLabelWithHint: true,
+            helperText: 'One line per line on the slip. Click in a line, then use the buttons to style it.'),
+      ),
+      const SizedBox(height: 8),
+      Wrap(spacing: 6, runSpacing: 6, children: [
+        btn('B', '[b]', 'Bold', w: FontWeight.w900),
+        btn('I', '[i]', 'Italic', st: FontStyle.italic),
+        btn('Big', '[big]', 'Larger text', replaces: const ['[small]']),
+        btn('Small', '[small]', 'Smaller text', replaces: const ['[big]']),
+        btn('Left', '[l]', 'Align left', replaces: const ['[c]', '[r]']),
+        btn('Centre', '[c]', 'Centre', replaces: const ['[l]', '[r]']),
+        btn('Right', '[r]', 'Align right', replaces: const ['[l]', '[c]']),
+        btn('Line', '[line]', 'Make this line a divider'),
+      ]),
+    ]);
+  }
+
   @override
   Widget build(BuildContext context) {
     final hasLogo = ('${companyRow()?['logo_url'] ?? ''}').isNotEmpty;
@@ -255,7 +314,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   const SizedBox(height: 14),
                   _field('address', 'Address'),
                   const SizedBox(height: 14),
-                  _field('receipt_footer', 'Receipt footer message'),
+                  _footerEditor(),
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,
                     title: const Text('Show our VAT number on the customer slip'),
@@ -467,7 +526,19 @@ class _ReceiptPreview extends StatelessWidget {
           row('Paid: Cash', 'Change R8.20'),
           if (values['receipt_footer']!.isNotEmpty) ...[
             const SizedBox(height: 12),
-            Text(values['receipt_footer']!, textAlign: TextAlign.center, style: small),
+            for (final l in footerLines(values['receipt_footer']!))
+              l.kind == 'divider'
+                  ? const Divider(height: 14)
+                  : l.kind == 'gap'
+                      ? const SizedBox(height: 6)
+                      : SizedBox(
+                          width: double.infinity,
+                          child: Text(l.left,
+                              textAlign: l.align < 0 ? TextAlign.left : (l.align > 0 ? TextAlign.right : TextAlign.center),
+                              style: small.copyWith(
+                                  fontSize: l.size + 4,
+                                  fontWeight: l.bold ? FontWeight.w800 : null,
+                                  fontStyle: l.italic ? FontStyle.italic : null))),
           ],
         ],
       ),

@@ -99,32 +99,86 @@ class ReceiptData {
 /// One line of a receipt. The screen, the PDF and the email are all drawn from
 /// the same list, so they always say the same thing.
 class RLine {
-  const RLine.center(this.left, {this.size = 9, this.bold = false})
+  /// [align]: -1 left, 0 centre, 1 right.
+  const RLine.center(this.left, {this.size = 9, this.bold = false, this.italic = false, this.align = 0})
       : right = null,
         kind = 'center';
-  const RLine.row(this.left, this.right, {this.size = 9, this.bold = false}) : kind = 'row';
+  const RLine.row(this.left, this.right, {this.size = 9, this.bold = false})
+      : kind = 'row',
+        italic = false,
+        align = 0;
   const RLine.note(this.left)
       : right = null,
         size = 8,
         bold = false,
+        italic = false,
+        align = 0,
         kind = 'note';
   const RLine.divider()
       : left = '',
         right = null,
         size = 0,
         bold = false,
+        italic = false,
+        align = 0,
         kind = 'divider';
   const RLine.gap()
       : left = '',
         right = null,
         size = 0,
         bold = false,
+        italic = false,
+        align = 0,
         kind = 'gap';
   final String kind;
   final String left;
   final String? right;
   final double size;
   final bool bold;
+  final bool italic;
+  final int align;
+}
+
+/// The footer message as the owner styled it. A line can start with any of these tags:
+/// [b] bold, [i] italic, [l] left, [c] centre, [r] right, [big], [small], and a line that is only [line] is a divider.
+List<RLine> footerLines(String footer) {
+  final tag = RegExp(r'^\s*\[(b|i|l|c|r|big|small|line)\]', caseSensitive: false);
+  final out = <RLine>[];
+  for (final raw in footer.split('\n')) {
+    var rest = raw;
+    var bold = false, italic = false, big = false, small = false, divider = false;
+    var align = 0;
+    for (var m = tag.firstMatch(rest); m != null; m = tag.firstMatch(rest)) {
+      switch (m.group(1)!.toLowerCase()) {
+        case 'b':
+          bold = true;
+        case 'i':
+          italic = true;
+        case 'l':
+          align = -1;
+        case 'c':
+          align = 0;
+        case 'r':
+          align = 1;
+        case 'big':
+          big = true;
+        case 'small':
+          small = true;
+        case 'line':
+          divider = true;
+      }
+      rest = rest.substring(m.end);
+    }
+    rest = rest.trim();
+    if (divider && rest.isEmpty) {
+      out.add(const RLine.divider());
+    } else if (rest.isEmpty) {
+      out.add(const RLine.gap());
+    } else {
+      out.add(RLine.center(rest, size: big ? 12 : (small ? 6.5 : 8), bold: bold, italic: italic, align: align));
+    }
+  }
+  return out;
 }
 
 String _method(dynamic m) => m == 'cash' ? 'Cash' : (m == 'account' ? 'On account' : 'Card');
@@ -257,7 +311,7 @@ List<RLine> receiptLines(ReceiptData r) {
       if (r.creditNotes.isNotEmpty)
         RLine.row('  Credit note', r.creditNotes.map((c) => 'CN-${'$c'.padLeft(6, '0')}').join(', '), size: 8),
     ],
-    if (footer.isNotEmpty) ...[const RLine.gap(), RLine.center(footer, size: 8)],
+    if (footer.isNotEmpty) ...[const RLine.gap(), ...footerLines(footer)],
   ];
   return lines;
 }
@@ -334,7 +388,9 @@ Future<Uint8List> receiptPdf(ReceiptData r) async {
       default:
         return pw.SizedBox(
             width: double.infinity,
-            child: pw.Text(l.left, style: t(l.size, bold: l.bold), textAlign: pw.TextAlign.center));
+            child: pw.Text(l.left,
+                style: t(l.size, bold: l.bold, italic: l.italic),
+                textAlign: l.align < 0 ? pw.TextAlign.left : (l.align > 0 ? pw.TextAlign.right : pw.TextAlign.center)));
     }
   }
 
@@ -792,6 +848,7 @@ class _ReceiptPaper extends StatelessWidget {
   Widget build(BuildContext context) {
     const mono = TextStyle(fontFamily: 'monospace', fontSize: 13, height: 1.35);
     TextStyle st(RLine l) => mono.copyWith(
+        fontStyle: l.italic ? FontStyle.italic : null,
         fontWeight: l.bold ? FontWeight.w800 : null, fontSize: l.size <= 0 ? 13 : (l.size + 4).clamp(10, 18).toDouble());
     Widget draw(RLine l) {
       switch (l.kind) {
@@ -814,7 +871,10 @@ class _ReceiptPaper extends StatelessWidget {
                   padding: const EdgeInsets.only(left: 16),
                   child: Text(l.left, style: mono.copyWith(fontSize: 11, fontStyle: FontStyle.italic))));
         default:
-          return SizedBox(width: double.infinity, child: Text(l.left, textAlign: TextAlign.center, style: st(l)));
+          return SizedBox(
+              width: double.infinity,
+              child: Text(l.left,
+                  textAlign: l.align < 0 ? TextAlign.left : (l.align > 0 ? TextAlign.right : TextAlign.center), style: st(l)));
       }
     }
 
