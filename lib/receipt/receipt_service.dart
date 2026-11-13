@@ -685,6 +685,7 @@ class _ReceiptDialogState extends State<_ReceiptDialog> {
     final hasAcct = r.payments.any((p) => p['method'] == 'account');
     String method = r.payments.isNotEmpty ? '${r.payments.first['method']}' : 'cash';
     bool restock = !r.cancelled;
+    final refundId = LocalStore.newId(); // one id per dialog: a retry cannot refund twice
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => StatefulBuilder(builder: (ctx, set) {
@@ -752,6 +753,7 @@ class _ReceiptDialogState extends State<_ReceiptDialog> {
         'p_method': method,
         'p_reason': reason.text.trim(),
         'p_restock': restock && !r.cancelled,
+        'p_id': refundId,
       });
       await _loadRefunds();
       _say(_notes.isEmpty ? 'Refund recorded.' : 'Refund recorded. Credit note CN-${'${_notes.last}'.padLeft(6, '0')}. Print the slip for the customer.');

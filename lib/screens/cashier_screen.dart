@@ -1301,6 +1301,7 @@ class _CancelDialog extends StatefulWidget {
 }
 
 class _CancelDialogState extends State<_CancelDialog> {
+  final _refundIds = <String, String>{};
   bool _busy = false;
 
   Future<String?> _askReason(String ref, {required bool paid}) {
@@ -1371,29 +1372,39 @@ class _CancelDialogState extends State<_CancelDialog> {
       final db = Supabase.instance.client;
       final pays = OrderRepo.paymentsFor(id);
       final acctPaid = round2(pays.where((p) => p['method'] == 'account').fold<double>(0, (s, p) => s + n(p['amount']).toDouble()));
-      final otherMethod = pays.where((p) => p['method'] != 'account').isNotEmpty
-          ? '${pays.firstWhere((p) => p['method'] != 'account')['method']}'
-          : 'cash';
       final already = await db.from('refunds').select('amount,method').eq('order_id', id);
       final refunded = already.fold<double>(0, (s, r) => s + n(r['amount']).toDouble());
       final acctBack = already.where((r) => r['method'] == 'account').fold<double>(0, (s, r) => s + n(r['amount']).toDouble());
       final toRefund = round2(paidAmount - refunded);
       final toAccount = round2((acctPaid - acctBack).clamp(0, toRefund));
-      final toCustomer = round2(toRefund - toAccount);
+      // Cash and card are each paid back the way they were paid, minus anything already refunded that way.
+      final byMethod = <String, double>{};
+      for (final p in pays.where((p) => p['method'] != 'account')) {
+        byMethod['${p['method']}'] = (byMethod['${p['method']}'] ?? 0) + n(p['amount']).toDouble();
+      }
+      for (final r in already.where((r) => r['method'] != 'account')) {
+        byMethod['${r['method']}'] = (byMethod['${r['method']}'] ?? 0) - n(r['amount']).toDouble();
+      }
+      byMethod.removeWhere((_, v) => v < 0.005);
+      final toCustomer = round2(byMethod.values.fold<double>(0, (s, v) => s + v));
+      // One id per refund line, so pressing the button again after a bad connection cannot pay it back twice.
       Future<void> refund(double amount, String method) => db.rpc('issue_refund', params: {
             'p_order_id': id,
             'p_amount': amount,
             'p_method': method,
             'p_reason': 'Order cancelled: $reason',
             'p_restock': false,
+            'p_id': _refundIds.putIfAbsent('$id|$method', () => LocalStore.newId()),
           });
       if (toAccount > 0.005) await refund(toAccount, 'account');
-      if (toCustomer > 0.005) await refund(toCustomer, otherMethod);
+      for (final e in byMethod.entries) {
+        await refund(round2(e.value), e.key);
+      }
       await db.from('orders').update({'status': 'void', 'void_reason': text}).eq('id', id);
       await SyncService.instance.syncNow();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text('Order #${o['order_ref']} cancelled. ${toAccount > 0.005 ? '${money(toAccount)} was credited to the customer account. ' : ''}Give the customer ${money(toCustomer > 0 ? toCustomer : 0)} back.')));
+            content: Text('Order #${o['order_ref']} cancelled. ${toAccount > 0.005 ? '${money(toAccount)} was credited to the customer account. ' : ''}Give the customer ${money(toCustomer > 0 ? toCustomer : 0)} back${byMethod.length > 1 ? ' (${byMethod.entries.map((e) => '${money(e.value)} ${e.key == 'cash' ? 'cash' : 'to the card'}').join(', ')})' : ''}.')));
       }
     } on PostgrestException catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
