@@ -39,6 +39,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _card = true;
   bool _eft = false;
   Map<String, dynamic> _style = {};
+  final _headerCtl = TextEditingController();
+  final _titleCtl = TextEditingController();
   bool _showVat = true;
   bool _showNotes = false;
   bool _busy = false;
@@ -60,6 +62,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _card = row['accept_card_manual'] != false;
     _eft = row['accept_eft'] == true;
     _style = row['receipt_style'] is Map ? Map<String, dynamic>.from(row['receipt_style'] as Map) : {};
+    _headerCtl.text = '${_style['header_text'] ?? ''}';
+    _titleCtl.text = '${_style['receipt_title'] ?? ''}';
     _showVat = row['show_vat_on_slip'] != false;
     _showNotes = row['show_notes_on_slip'] == true;
   }
@@ -71,6 +75,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
     _vat.dispose();
     _tables.dispose();
+    _headerCtl.dispose();
+    _titleCtl.dispose();
     super.dispose();
   }
 
@@ -178,8 +184,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       );
 
   /// Puts [tag] at the start of the line the cursor is on, or takes it off if it is already there.
-  void _toggleTag(String tag, {List<String> replaces = const []}) {
-    final c = _c['receipt_footer']!;
+  void _toggleTag(TextEditingController c, String tag, {List<String> replaces = const [], VoidCallback? changed}) {
     final text = c.text;
     var pos = c.selection.isValid ? c.selection.baseOffset.clamp(0, text.length) : text.length;
     final start = pos == 0 ? 0 : text.lastIndexOf('\n', pos - 1) + 1;
@@ -199,27 +204,30 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
     final next = text.replaceRange(start, end, '$tags$body');
     c.value = TextEditingValue(text: next, selection: TextSelection.collapsed(offset: start + tags.length + body.length));
+    changed?.call();
     setState(() {});
   }
 
-  Widget _footerEditor() {
-    Widget btn(String label, String tag, String tip, {List<String> replaces = const [], FontWeight? w, FontStyle? st}) => Tooltip(
+  /// A text box with buttons that style the line the cursor is on (bold, italic, size, alignment, divider).
+  Widget _tagEditor(TextEditingController ctl, String label, String help, {int lines = 2, VoidCallback? changed}) {
+    Widget btn(String text, String tag, String tip, {List<String> replaces = const [], FontWeight? w, FontStyle? st}) => Tooltip(
           message: tip,
           child: OutlinedButton(
-            style: OutlinedButton.styleFrom(minimumSize: const Size(40, 36), padding: const EdgeInsets.symmetric(horizontal: 10)),
-            onPressed: () => _toggleTag(tag, replaces: replaces),
-            child: Text(label, style: TextStyle(fontWeight: w, fontStyle: st)),
+            style: OutlinedButton.styleFrom(minimumSize: const Size(40, 34), padding: const EdgeInsets.symmetric(horizontal: 9)),
+            onPressed: () => _toggleTag(ctl, tag, replaces: replaces, changed: changed),
+            child: Text(text, style: TextStyle(fontWeight: w, fontStyle: st)),
           ),
         );
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       TextField(
-        controller: _c['receipt_footer'],
-        minLines: 2,
-        maxLines: 6,
-        onChanged: (_) => setState(() {}),
-        decoration: const InputDecoration(
-            labelText: 'Receipt footer message', isDense: true, alignLabelWithHint: true,
-            helperText: 'One line per line on the slip. Click in a line, then use the buttons to style it.'),
+        controller: ctl,
+        minLines: lines,
+        maxLines: lines + 4,
+        onChanged: (_) {
+          changed?.call();
+          setState(() {});
+        },
+        decoration: InputDecoration(labelText: label, isDense: true, alignLabelWithHint: true, helperText: help),
       ),
       const SizedBox(height: 8),
       Wrap(spacing: 6, runSpacing: 6, children: [
@@ -271,10 +279,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  Widget _layoutEditor() {
+  Widget _designerEditor() {
     final st = ReceiptStyle.of({'receipt_style': _style});
+    Widget section(String title, List<Widget> kids, {bool open = false}) => Card(
+          margin: const EdgeInsets.only(bottom: 10),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: const BorderSide(color: Brand.border)),
+          elevation: 0,
+          child: Theme(
+            data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+            child: ExpansionTile(
+              initiallyExpanded: open,
+              tilePadding: const EdgeInsets.symmetric(horizontal: 14),
+              childrenPadding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+              expandedCrossAxisAlignment: CrossAxisAlignment.start,
+              title: Text(title, style: const TextStyle(fontWeight: FontWeight.w800)),
+              children: kids,
+            ),
+          ),
+        );
     Widget label(String t) => Padding(
-        padding: const EdgeInsets.only(top: 14, bottom: 6),
+        padding: const EdgeInsets.only(top: 12, bottom: 6),
         child: Text(t, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13)));
     Widget seg<T>(T value, List<(T, String)> opts, void Function(T) on) => SegmentedButton<T>(
           showSelectedIcon: false,
@@ -283,39 +307,162 @@ class _SettingsScreenState extends State<SettingsScreen> {
           selected: {value},
           onSelectionChanged: (v) => on(v.first),
         );
-    final scale = const [0.85, 1.0, 1.15, 1.3].reduce((a, b) => (a - st.fontScale).abs() <= (b - st.fontScale).abs() ? a : b);
+    Widget slider(String text, double value, double min, double max, void Function(double) on, {String? shown}) => Row(children: [
+          SizedBox(width: 120, child: Text(text, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
+          Expanded(
+              child: Slider(
+                  value: value.clamp(min, max),
+                  min: min,
+                  max: max,
+                  divisions: ((max - min) / 0.05).round(),
+                  onChanged: (v) => on((v * 20).round() / 20))),
+          SizedBox(width: 44, child: Text(shown ?? '${(value * 100).round()}%', textAlign: TextAlign.right)),
+        ]);
+    Widget chip(String text, bool on, String key) =>
+        FilterChip(label: Text(text), selected: on, onSelected: (v) => _setStyle(key, v));
+    final alignOpts = const [(-1, 'Left'), (0, 'Centre'), (1, 'Right')];
+
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      const Text('Receipt layout', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
-      const SizedBox(height: 2),
-      const Text('The preview above changes as you pick. Remember to press Save changes.',
-          style: TextStyle(color: Brand.muted, fontSize: 12)),
-      label('Text size'),
-      seg<double>(scale, const [(0.85, 'Small'), (1.0, 'Normal'), (1.15, 'Large'), (1.3, 'Extra large')],
-          (v) => _setStyle('font_scale', v)),
-      label('Logo'),
-      seg<String>(st.logo, const [('hide', 'Hidden'), ('small', 'Small'), ('medium', 'Medium'), ('large', 'Large')],
-          (v) => _setStyle('logo', v)),
-      label('Name and contact lines'),
-      seg<int>(st.headerAlign, const [(-1, 'Left'), (0, 'Centre'), (1, 'Right')], (v) => _setStyle('header_align', v)),
-      label('Show at the top of the slip'),
-      Wrap(spacing: 8, runSpacing: 6, children: [
-        FilterChip(label: const Text('Address'), selected: st.showAddress, onSelected: (v) => _setStyle('show_address', v)),
-        FilterChip(label: const Text('Phone'), selected: st.showPhone, onSelected: (v) => _setStyle('show_phone', v)),
-        FilterChip(label: const Text('Email'), selected: st.showEmail, onSelected: (v) => _setStyle('show_email', v)),
-        FilterChip(label: const Text('Company reg. no.'), selected: st.showReg, onSelected: (v) => _setStyle('show_reg', v)),
+      section('Top of the slip', open: true, [
+        label('Logo'),
+        seg<String>(st.logo, const [('hide', 'Hidden'), ('small', 'S'), ('medium', 'M'), ('large', 'L'), ('xl', 'XL')],
+            (v) => _setStyle('logo', v)),
+        label('Logo position'),
+        seg<int>(st.logoAlign, alignOpts, (v) => _setStyle('logo_align', v)),
+        label('Name and contact lines'),
+        seg<int>(st.headerAlign, alignOpts, (v) => _setStyle('header_align', v)),
+        const SizedBox(height: 6),
+        slider('Business name size', st.nameScale, 1.0, 1.6, (v) => _setStyle('name_scale', v)),
+        label('Show'),
+        Wrap(spacing: 8, runSpacing: 6, children: [
+          chip('Address', st.showAddress, 'show_address'),
+          chip('Phone', st.showPhone, 'show_phone'),
+          chip('Email', st.showEmail, 'show_email'),
+          chip('Company reg. no.', st.showReg, 'show_reg'),
+        ]),
+        const SizedBox(height: 4),
+        const Text('The VAT number shows whenever "Show our VAT number" below is on, because a tax invoice must carry it.',
+            style: TextStyle(color: Brand.muted, fontSize: 12)),
+        const SizedBox(height: 12),
+        _tagEditor(_headerCtl, 'Message above the business name (optional)', 'For example [b][big]Welcome to our shop',
+            changed: () => _style = {..._style, 'header_text': _headerCtl.text}),
       ]),
-      const SizedBox(height: 4),
-      const Text('The VAT number shows whenever "Show our VAT number on the customer slip" is on, because a tax invoice must carry it.',
-          style: TextStyle(color: Brand.muted, fontSize: 12)),
-      label('Divider lines'),
-      seg<String>(st.divider, const [('solid', 'Solid'), ('dashed', 'Dashed'), ('dotted', 'Dotted'), ('double', 'Double')],
-          (v) => _setStyle('divider', v)),
-      const SizedBox(height: 10),
+      section('Order details', [
+        const SizedBox(height: 8),
+        Wrap(spacing: 8, runSpacing: 6, children: [
+          chip('Date and time', st.showDate, 'show_date'),
+          chip('Eat in / take away / table', st.showOrderType, 'show_order_type'),
+          chip('Customer name and address', st.showCustomer, 'show_customer'),
+          chip('Served by (first name)', st.showServedBy, 'show_served_by'),
+        ]),
+        label('Heading when there is no VAT number'),
+        TextField(
+          controller: _titleCtl,
+          maxLength: 28,
+          onChanged: (v) => _setStyle('receipt_title', v),
+          decoration: const InputDecoration(isDense: true, hintText: 'RECEIPT', helperText: 'A tax invoice is always headed TAX INVOICE.'),
+        ),
+      ]),
+      section('Items and totals', [
+        const SizedBox(height: 8),
+        Wrap(spacing: 8, runSpacing: 6, children: [
+          chip('Price of each (2 x Burger @ R54.90)', st.showUnitPrice, 'show_unit_price'),
+          chip('Excl. VAT and VAT lines', st.showVatLines, 'show_vat_lines'),
+        ]),
+        const SizedBox(height: 6),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('Show our VAT number on the customer slip'),
+          subtitle: const Text('Off: the slip is headed as a plain receipt. A tax invoice must show your VAT number.'),
+          value: _showVat,
+          onChanged: (v) => setState(() => _showVat = v),
+        ),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('Show kitchen notes on the customer slip'),
+          subtitle: const Text('Off: only the special requests chosen for the item show. The kitchen slip always shows everything.'),
+          value: _showNotes,
+          onChanged: (v) => setState(() => _showNotes = v),
+        ),
+        slider('Total line size', st.totalScale, 1.0, 1.6, (v) => _setStyle('total_scale', v)),
+      ]),
+      section('Look', [
+        const SizedBox(height: 8),
+        slider('Text size', st.fontScale, 0.7, 1.5, (v) => _setStyle('font_scale', v)),
+        label('Line spacing'),
+        seg<String>(st.spacing, const [('tight', 'Tight'), ('normal', 'Normal'), ('roomy', 'Roomy')], (v) => _setStyle('spacing', v)),
+        label('Lettering'),
+        seg<String>(st.font, const [('default', 'Standard'), ('mono', 'Typewriter')], (v) => _setStyle('font', v)),
+        label('Divider lines'),
+        seg<String>(st.divider, const [('solid', 'Solid'), ('dashed', 'Dashed'), ('dotted', 'Dotted'), ('double', 'Double')],
+            (v) => _setStyle('divider', v)),
+      ]),
+      section('Bottom of the slip', open: true, [
+        const SizedBox(height: 8),
+        _tagEditor(_c['receipt_footer']!, 'Receipt footer message',
+            'One line per line on the slip. Click in a line, then use the buttons to style it.', lines: 3),
+      ]),
       Align(
         alignment: Alignment.centerLeft,
-        child: TextButton(onPressed: () => setState(() => _style = {}), child: const Text('Reset layout to default')),
+        child: TextButton(
+            onPressed: () => setState(() {
+                  _style = {};
+                  _headerCtl.text = '';
+                  _titleCtl.text = '';
+                }),
+            child: const Text('Reset the layout to the default')),
       ),
     ]);
+  }
+
+  /// Editor on the left, a live slip on the right that stays in view while you scroll the editor.
+  Widget _designer() {
+    final preview = Container(
+      decoration: BoxDecoration(color: const Color(0xFFEEF2FB), borderRadius: BorderRadius.circular(12)),
+      padding: const EdgeInsets.all(14),
+      child: Column(children: [
+        const Text('Live preview', style: TextStyle(fontWeight: FontWeight.w800)),
+        const SizedBox(height: 4),
+        const Text('A sample sale. This is how the slip prints.', style: TextStyle(color: Brand.muted, fontSize: 12)),
+        const SizedBox(height: 10),
+        Expanded(
+          child: SingleChildScrollView(
+            child: Center(child: SizedBox(width: 330, child: ReceiptPaper(r: _sampleReceipt()))),
+          ),
+        ),
+      ]),
+    );
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            const Expanded(child: Text('Receipt designer', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800))),
+            FilledButton.icon(onPressed: _save, icon: const Icon(Icons.save_outlined, size: 18), label: const Text('Save changes')),
+          ]),
+          const SizedBox(height: 2),
+          const Text('Change anything on the left and the slip on the right updates straight away. Press Save changes to use it on every device.',
+              style: TextStyle(color: Brand.muted, fontSize: 12)),
+          const SizedBox(height: 12),
+          LayoutBuilder(builder: (context, box) {
+            if (box.maxWidth >= 900) {
+              return SizedBox(
+                height: 720,
+                child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Expanded(child: SingleChildScrollView(padding: const EdgeInsets.only(right: 14), child: _designerEditor())),
+                  SizedBox(width: 390, child: preview),
+                ]),
+              );
+            }
+            return Column(children: [
+              SizedBox(height: 430, child: preview),
+              const SizedBox(height: 12),
+              _designerEditor(),
+            ]);
+          }),
+        ]),
+      ),
+    );
   }
 
   @override
@@ -404,21 +551,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   const SizedBox(height: 14),
                   _field('address', 'Address'),
                   const SizedBox(height: 14),
-                  _footerEditor(),
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('Show our VAT number on the customer slip'),
-                    subtitle: const Text('Off: the slip says RECEIPT, not TAX INVOICE. A tax invoice must show your VAT number.'),
-                    value: _showVat,
-                    onChanged: (v) => setState(() => _showVat = v),
-                  ),
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('Show kitchen notes on the customer slip'),
-                    subtitle: const Text('Off: the slip shows only the special requests chosen for the item. The kitchen slip always shows everything.'),
-                    value: _showNotes,
-                    onChanged: (v) => setState(() => _showNotes = v),
-                  ),
+                  const Text('Receipt wording, layout and preview are in the Receipt designer below.',
+                      style: TextStyle(color: Brand.muted, fontSize: 12)),
                 ],
               );
             }),
@@ -475,28 +609,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
     );
 
-    final receipt = Card(
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('Receipt preview',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
-            const SizedBox(height: 12),
-            Center(child: SizedBox(width: 340, child: ReceiptPaper(r: _sampleReceipt()))),
-          ],
-        ),
-      ),
-    );
-
-    final layout = Card(
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: _layoutEditor(),
-      ),
-    );
-
     return ListView(
       padding: const EdgeInsets.all(24),
       children: [
@@ -534,13 +646,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 const SizedBox(width: 16),
                 SizedBox(
                   width: 400,
-                  child: Column(children: [payments, const SizedBox(height: 16), receipt, const SizedBox(height: 16), layout]),
+                  child: Column(children: [payments]),
                 ),
               ],
             );
           }
-          return Column(children: [details, const SizedBox(height: 16), payments, const SizedBox(height: 16), receipt, const SizedBox(height: 16), layout]);
+          return Column(children: [details, const SizedBox(height: 16), payments]);
         }),
+        const SizedBox(height: 16),
+        _designer(),
         const SizedBox(height: 16),
         Card(
           child: Padding(

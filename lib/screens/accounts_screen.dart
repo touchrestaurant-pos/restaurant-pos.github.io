@@ -6,6 +6,7 @@ import '../data/accounts_repo.dart';
 import '../data/local_store.dart';
 import '../data/repo.dart';
 import '../receipt/account_docs.dart';
+import '../data/supplier_ledger.dart';
 import '../receipt/ledger.dart';
 import '../widgets/ledger_statement.dart';
 import '../theme.dart';
@@ -567,6 +568,10 @@ class _AccountsScreenState extends State<AccountsScreen> {
             onPressed: () async => Printing.layoutPdf(name: 'Account-application', onLayout: (_) => applicationFormPdf()),
             icon: const Icon(Icons.description_outlined),
             label: const Text('Print application form')),
+        OutlinedButton.icon(
+            onPressed: () => openAllAccountsAnalysis(context),
+            icon: const Icon(Icons.insights),
+            label: const Text('Transactions and analysis')),
         OutlinedButton.icon(
             onPressed: _rows.isEmpty ? null : _printList, icon: const Icon(Icons.print_outlined), label: const Text('Print list')),
         IconButton(onPressed: _load, tooltip: 'Refresh', icon: const Icon(Icons.refresh)),

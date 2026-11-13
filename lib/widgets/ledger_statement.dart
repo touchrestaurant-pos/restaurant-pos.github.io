@@ -156,18 +156,23 @@ class _LedgerDialogState extends State<_LedgerDialog> {
             OutlinedButton(onPressed: () => _pick(false), child: Text('To ${_f(_to)}')),
           ]),
           const SizedBox(height: 8),
-          SegmentedButton<String>(
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: SegmentedButton<String>(
             showSelectedIcon: false,
             style: const ButtonStyle(visualDensity: VisualDensity.compact),
-            segments: const [
-              ButtonSegment(value: 'list', icon: Icon(Icons.grid_on, size: 16), label: Text('List')),
-              ButtonSegment(value: 'balance', icon: Icon(Icons.show_chart, size: 16), label: Text('Balance')),
-              ButtonSegment(value: 'month', icon: Icon(Icons.bar_chart, size: 16), label: Text('By month')),
-              ButtonSegment(value: 'mix', icon: Icon(Icons.pie_chart_outline, size: 16), label: Text('How paid')),
+            segments: [
+              const ButtonSegment(value: 'list', icon: Icon(Icons.grid_on, size: 16), label: Text('List')),
+              const ButtonSegment(value: 'analysis', icon: Icon(Icons.insights, size: 16), label: Text('Analysis')),
+              const ButtonSegment(value: 'balance', icon: Icon(Icons.show_chart, size: 16), label: Text('Balance')),
+              if (g != null && g.lines.any((l) => l.party.isNotEmpty))
+                const ButtonSegment(value: 'party', icon: Icon(Icons.groups_outlined, size: 16), label: Text('By name')),
+              const ButtonSegment(value: 'month', icon: Icon(Icons.bar_chart, size: 16), label: Text('By month')),
+              const ButtonSegment(value: 'mix', icon: Icon(Icons.pie_chart_outline, size: 16), label: Text('How paid')),
             ],
             selected: {_view},
             onSelectionChanged: (v) => setState(() => _view = v.first),
-          ),
+          )),
           const SizedBox(height: 8),
           if (_busy) const LinearProgressIndicator(),
           if (_err != null) Text(_err!, style: const TextStyle(color: Brand.red, fontWeight: FontWeight.w600)),
@@ -205,6 +210,8 @@ class _LedgerDialogState extends State<_LedgerDialog> {
       _chip('Closing', money(g.closing), bold: true),
     ]);
     switch (_view) {
+      case 'analysis':
+        return _analysis(g, summary);
       case 'balance':
         final pts = [for (final l in g.lines.where((l) => !l.muted)) ChartPoint(l.date, l.balance, detail: l.what)];
         return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -213,6 +220,25 @@ class _LedgerDialogState extends State<_LedgerDialog> {
           pts.length < 2
               ? const Padding(padding: EdgeInsets.all(16), child: Text('Not enough activity in this period to draw a line.'))
               : LineCard(title: 'Balance after each entry', points: pts, format: (v) => money(v)),
+        ]);
+      case 'party':
+        final ch = <String, double>{}, pd = <String, double>{};
+        for (final l in g.lines) {
+          if (l.party.isEmpty) continue;
+          if (!l.muted) ch[l.party] = (ch[l.party] ?? 0) + l.charge;
+          pd[l.party] = (pd[l.party] ?? 0) + l.paid;
+        }
+        final net = {for (final k in {...ch.keys, ...pd.keys}) k: (ch[k] ?? 0) - (pd[k] ?? 0)};
+        List<ChartPoint> top(Map<String, double> m, {bool positiveOnly = false}) {
+          final e = m.entries.where((x) => positiveOnly ? x.value > 0.005 : x.value > 0.005).toList()..sort((a, b) => b.value.compareTo(a.value));
+          return [for (final x in e.take(10)) ChartPoint(x.key, x.value)];
+        }
+        return Column(children: [
+          summary,
+          const SizedBox(height: 8),
+          RankedBars(title: 'Biggest balance growth (charged minus paid)', points: top(net, positiveOnly: true), format: (v) => money(v), colorFor: (_) => Brand.red),
+          RankedBars(title: g.chargeLabel, points: top(ch), format: (v) => money(v)),
+          RankedBars(title: g.paidLabel, points: top(pd), format: (v) => money(v), colorFor: (_) => Brand.green),
         ]);
       case 'month':
         final charge = <String, double>{};
@@ -264,6 +290,63 @@ class _LedgerDialogState extends State<_LedgerDialog> {
             ),
         ]);
     }
+  }
+
+  /// Plain-language numbers about this account over the chosen dates.
+  Widget _analysis(Ledger g, Widget summary) {
+    final st = analyseLedger(g);
+    if (st.chargeCount + st.paymentCount == 0) {
+      return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        summary,
+        const Padding(padding: EdgeInsets.all(16), child: Text('No activity in this period to analyse. Try a longer date range.')),
+      ]);
+    }
+    final what = g.chargeLabel.toLowerCase();
+    String days(double? v) => v == null ? 'n/a' : '${v.round()} days';
+    final tips = <String>[
+      if (st.avgDaysToPay != null) 'Items were settled on average ${st.avgDaysToPay!.round()} days after they were raised (oldest paid first).',
+      if (st.oldestOpenDays != null && g.closing > 0.005) 'The oldest unpaid item is ${st.oldestOpenDays} days old.',
+      if (g.totalCharges > 0.005)
+        'Payments covered ${(st.paidShare * 100).round()}% of what was ${g.chargeLabel == 'Sales' ? 'sold on account' : 'bought'} in this period${st.paidShare < 0.999 ? ', so the balance grew by ${money(g.totalCharges - g.totalPaid)}' : (st.paidShare > 1.001 ? ', so the balance shrank by ${money(g.totalPaid - g.totalCharges)}' : '')}.',
+      if (g.closing < -0.005) 'The account is in credit by ${money(-g.closing)}: more was paid than was charged.',
+    ];
+    final topCharges = ([...g.lines.where((l) => !l.muted && l.charge > 0)]..sort((a, b) => b.charge.compareTo(a.charge))).take(5);
+    final topPays = ([...g.lines.where((l) => l.paid > 0)]..sort((a, b) => b.paid.compareTo(a.paid))).take(5);
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      summary,
+      const SizedBox(height: 10),
+      Wrap(spacing: 8, runSpacing: 8, children: [
+        _chip('Number of $what', '${st.chargeCount}'),
+        _chip('Average each', money(st.avgCharge)),
+        _chip('Average per month', money(st.perMonthCharge)),
+        _chip('Number of payments', '${st.paymentCount}'),
+        _chip('Average payment', money(st.avgPayment)),
+        _chip('Average days to pay', days(st.avgDaysToPay)),
+        _chip('Oldest unpaid', st.oldestOpenDays == null ? 'none' : '${st.oldestOpenDays} days'),
+        _chip('Paid vs charged', '${(st.paidShare * 100).round()}%'),
+      ]),
+      const SizedBox(height: 10),
+      for (final t in tips)
+        Padding(
+          padding: const EdgeInsets.only(bottom: 4),
+          child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const Padding(padding: EdgeInsets.only(top: 2, right: 6), child: Icon(Icons.insights, size: 16, color: Brand.navy)),
+            Expanded(child: Text(t)),
+          ]),
+        ),
+      const SizedBox(height: 8),
+      if (topCharges.isNotEmpty)
+        RankedBars(
+            title: 'Biggest ${g.chargeLabel == 'Sales' ? 'sales' : 'deliveries'}',
+            points: [for (final l in topCharges) ChartPoint('${l.date}  ${l.what}', l.charge)],
+            format: (v) => money(v)),
+      if (topPays.isNotEmpty)
+        RankedBars(
+            title: 'Biggest payments',
+            points: [for (final l in topPays) ChartPoint('${l.date}  ${l.what}', l.paid)],
+            format: (v) => money(v),
+            colorFor: (_) => Brand.green),
+    ]);
   }
 
   Widget _chip(String label, String value, {bool bold = false}) => Container(

@@ -101,17 +101,33 @@ class ReceiptStyle {
   const ReceiptStyle({
     this.fontScale = 1.0,
     this.logo = 'medium',
+    this.logoAlign = 0,
     this.showAddress = true,
     this.showPhone = true,
     this.showEmail = true,
     this.showReg = false,
     this.divider = 'solid',
     this.headerAlign = 0,
+    this.nameScale = 1.0,
+    this.headerText = '',
+    this.receiptTitle = 'RECEIPT',
+    this.showDate = true,
+    this.showOrderType = true,
+    this.showCustomer = true,
+    this.showServedBy = false,
+    this.showUnitPrice = false,
+    this.showVatLines = true,
+    this.totalScale = 1.0,
+    this.spacing = 'normal',
+    this.font = 'default',
   });
   final double fontScale;
 
-  /// hide, small, medium, large
+  /// hide, small, medium, large, xl
   final String logo;
+
+  /// -1 left, 0 centre, 1 right
+  final int logoAlign;
   final bool showAddress, showPhone, showEmail, showReg;
 
   /// solid, dashed, dotted, double
@@ -120,26 +136,63 @@ class ReceiptStyle {
   /// -1 left, 0 centre, 1 right (name and contact lines at the top)
   final int headerAlign;
 
+  /// Size of the business name: 1, 1.25 or 1.5 times normal.
+  final double nameScale;
+
+  /// A message above the business name. Takes the same [b] [i] [big] tags as the footer.
+  final String headerText;
+
+  /// What a slip without a VAT number is headed (a tax invoice is always headed TAX INVOICE).
+  final String receiptTitle;
+  final bool showDate, showOrderType, showCustomer, showServedBy, showUnitPrice, showVatLines;
+
+  /// Size of the TOTAL line: 1, 1.25 or 1.5 times normal.
+  final double totalScale;
+
+  /// tight, normal, roomy
+  final String spacing;
+
+  /// default (as before) or mono (typewriter look)
+  final String font;
+
   static ReceiptStyle of(Map<String, dynamic>? company) {
     final raw = company?['receipt_style'];
     final m = raw is Map ? raw : const {};
     bool b(String k, bool d) => m[k] is bool ? m[k] as bool : d;
     String sOf(String k, String d, List<String> ok) => ok.contains('${m[k]}') ? '${m[k]}' : d;
-    final fs = m['font_scale'];
+    int al(String k) => m[k] is int ? (m[k] as int).clamp(-1, 1) : 0;
+    double sc(String k, double lo, double hi) => m[k] is num ? (m[k] as num).toDouble().clamp(lo, hi) : 1.0;
+    final title = '${m['receipt_title'] ?? ''}'.trim();
     return ReceiptStyle(
-      fontScale: fs is num ? fs.toDouble().clamp(0.7, 1.6) : 1.0,
-      logo: sOf('logo', 'medium', const ['hide', 'small', 'medium', 'large']),
+      fontScale: sc('font_scale', 0.7, 1.6),
+      logo: sOf('logo', 'medium', const ['hide', 'small', 'medium', 'large', 'xl']),
+      logoAlign: al('logo_align'),
       showAddress: b('show_address', true),
       showPhone: b('show_phone', true),
       showEmail: b('show_email', true),
       showReg: b('show_reg', false),
       divider: sOf('divider', 'solid', const ['solid', 'dashed', 'dotted', 'double']),
-      headerAlign: m['header_align'] is int ? (m['header_align'] as int).clamp(-1, 1) : 0,
+      headerAlign: al('header_align'),
+      nameScale: sc('name_scale', 1.0, 1.6),
+      headerText: '${m['header_text'] ?? ''}'.trim(),
+      receiptTitle: title.isEmpty ? 'RECEIPT' : (title.length > 28 ? title.substring(0, 28) : title),
+      showDate: b('show_date', true),
+      showOrderType: b('show_order_type', true),
+      showCustomer: b('show_customer', true),
+      showServedBy: b('show_served_by', false),
+      showUnitPrice: b('show_unit_price', false),
+      showVatLines: b('show_vat_lines', true),
+      totalScale: sc('total_scale', 1.0, 1.6),
+      spacing: sOf('spacing', 'normal', const ['tight', 'normal', 'roomy']),
+      font: sOf('font', 'default', const ['default', 'mono']),
     );
   }
 
   /// Logo height and width on the paper, in points.
-  double get logoSize => switch (logo) { 'small' => 30, 'large' => 70, _ => 46 };
+  double get logoSize => switch (logo) { 'small' => 30, 'large' => 70, 'xl' => 96, _ => 46 };
+
+  /// Extra space between lines, in points.
+  double get lineGap => switch (spacing) { 'tight' => 0, 'roomy' => 3.5, _ => 1 };
 }
 
 /// One line of a receipt. The screen, the PDF and the email are all drawn from
@@ -302,6 +355,15 @@ String _customerNote(Map<String, dynamic> item, bool showAll) {
       .join(' · ');
 }
 
+/// The name of the person who took the order, when this device knows it.
+String _servedBy(ReceiptData r) {
+  final id = r.order['created_by'];
+  if (id == null) return '';
+  final row = LocalStore.row('staff_profiles', id);
+  final name = '${row?['full_name'] ?? ''}'.trim();
+  return name.split(' ').first;
+}
+
 List<RLine> receiptLines(ReceiptData r) {
   final c = r.company;
   // The supplier's VAT number must appear on a tax invoice, so hiding it makes this a plain receipt.
@@ -310,8 +372,10 @@ List<RLine> receiptLines(ReceiptData r) {
   final showVat = c['show_vat_on_slip'] != false;
   final footer = '${c['receipt_footer'] ?? ''}'.trim();
   final st = ReceiptStyle.of(c);
+  final servedBy = st.showServedBy ? _servedBy(r) : '';
   final lines = <RLine>[
-    RLine.center(r.companyName, size: 13, bold: true, align: st.headerAlign),
+    if (st.headerText.isNotEmpty) ...[...footerLines(st.headerText), const RLine.gap()],
+    RLine.center(r.companyName, size: 13 * st.nameScale, bold: true, align: st.headerAlign),
     for (final k in ['company_name', 'address', 'phone', 'email'])
       if ('${c[k] ?? ''}'.trim().isNotEmpty &&
           !(k == 'company_name' && '${c[k]}'.trim() == r.companyName) &&
@@ -323,25 +387,26 @@ List<RLine> receiptLines(ReceiptData r) {
       RLine.center('Reg no. ${'${c['reg_number']}'.trim()}', size: 8, align: st.headerAlign),
     if (taxInvoice) RLine.center('VAT no. ${r.vatNumber}', size: 8, align: st.headerAlign),
     const RLine.divider(),
-    RLine.center(taxInvoice ? 'TAX INVOICE' : 'RECEIPT', size: 11, bold: true),
+    RLine.center(taxInvoice ? 'TAX INVOICE' : st.receiptTitle, size: 11, bold: true),
     if (r.invoiceNo != null)
       RLine.center('No. ${r.invoiceNo}', size: 10, bold: true)
     else if (r.paid)
       const RLine.center('Invoice number given when synced', size: 7),
-    RLine.center('Order #${r.ref} · ${_when.format(r.when)}', size: 8),
-    if (r.typeText.isNotEmpty) RLine.center(r.typeText, size: 8),
-    if ('${r.order['customer_name'] ?? ''}'.trim().isNotEmpty)
+    RLine.center('Order #${r.ref}${st.showDate ? ' · ${_when.format(r.when)}' : ''}', size: 8),
+    if (st.showOrderType && r.typeText.isNotEmpty) RLine.center(r.typeText, size: 8),
+    if (servedBy.isNotEmpty) RLine.center('Served by $servedBy', size: 8),
+    if (st.showCustomer && '${r.order['customer_name'] ?? ''}'.trim().isNotEmpty)
       RLine.center(
           'Customer: ${r.order['customer_name']}${'${r.order['customer_phone'] ?? ''}'.trim().isEmpty ? '' : ' · ${r.order['customer_phone']}'}',
           size: 8),
-    if ('${r.order['delivery_address'] ?? ''}'.trim().isNotEmpty)
+    if (st.showCustomer && '${r.order['delivery_address'] ?? ''}'.trim().isNotEmpty)
       RLine.center('Deliver to: ${r.order['delivery_address']}', size: 8),
     if (r.cancelled) const RLine.center('CANCELLED', size: 11, bold: true),
     if (!r.paid && !r.cancelled)
       RLine.center(r.paidAmount > 0 ? 'PART PAID' : 'NOT PAID - BILL', size: 11, bold: true),
     const RLine.divider(),
     for (final i in r.items) ...[
-      RLine.row('${i['qty']} x ${i['name']}${showVat ? (i['vat_type'] == 'zero' ? ' (Z)' : (i['vat_type'] == 'exempt' ? ' (E)' : '')) : ''}',
+      RLine.row('${i['qty']} x ${i['name']}${st.showUnitPrice && n(i['qty']) > 1 ? ' @ ${money(n(i['unit_price']))}' : ''}${showVat ? (i['vat_type'] == 'zero' ? ' (Z)' : (i['vat_type'] == 'exempt' ? ' (E)' : '')) : ''}',
           _lineTotal(i)),
       if (_customerNote(i, showNotes).isNotEmpty) RLine.note(_customerNote(i, showNotes)),
     ],
@@ -353,8 +418,8 @@ List<RLine> receiptLines(ReceiptData r) {
           '-${money(r.discount)}',
           size: 8),
     ],
-    RLine.row(showVat ? 'TOTAL (incl. VAT)' : 'TOTAL', money(r.total), bold: true, size: 12),
-    if (showVat) ...[
+    RLine.row(showVat ? 'TOTAL (incl. VAT)' : 'TOTAL', money(r.total), bold: true, size: 12 * st.totalScale),
+    if (showVat && st.showVatLines) ...[
       RLine.row('Excl. VAT', money(r.subtotal), size: 8),
       RLine.row('VAT ${_rate()}%', money(r.vat), size: 8),
       ..._vatSplit(r),
@@ -419,7 +484,10 @@ Future<Uint8List> receiptPdf(ReceiptData r) async {
   final small = slipPaperMm() == 58;
   final style = ReceiptStyle.of(c);
   if (style.logo == 'hide') logo = null;
+  final mono = style.font == 'mono';
   pw.TextStyle t(double size, {bool bold = false, bool italic = false}) => pw.TextStyle(
+      font: mono ? (italic ? pw.Font.courierOblique() : pw.Font.courier()) : null,
+      fontBold: mono ? (italic ? pw.Font.courierBoldOblique() : pw.Font.courierBold()) : null,
       fontSize: (small ? size * 0.85 : size) * style.fontScale,
       fontWeight: bold ? pw.FontWeight.bold : pw.FontWeight.normal,
       fontStyle: italic ? pw.FontStyle.italic : pw.FontStyle.normal);
@@ -445,7 +513,7 @@ Future<Uint8List> receiptPdf(ReceiptData r) async {
         return pw.SizedBox(height: 4);
       case 'row':
         return pw.Padding(
-          padding: const pw.EdgeInsets.only(bottom: 1),
+          padding: pw.EdgeInsets.only(bottom: style.lineGap),
           child: pw.Row(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
             pw.Expanded(child: pw.Text(l.left, style: t(l.size, bold: l.bold))),
             pw.SizedBox(width: 6),
@@ -473,7 +541,10 @@ Future<Uint8List> receiptPdf(ReceiptData r) async {
       // roll's fixed page length. A minimum length avoids that.
       constraints: const pw.BoxConstraints(minHeight: 70 * PdfPageFormat.mm),
       child: pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.stretch, children: [
-        if (logo != null) pw.Center(child: pw.Image(logo, width: style.logoSize, height: style.logoSize, fit: pw.BoxFit.contain)),
+        if (logo != null)
+          pw.Align(
+              alignment: style.logoAlign < 0 ? pw.Alignment.centerLeft : (style.logoAlign > 0 ? pw.Alignment.centerRight : pw.Alignment.center),
+              child: pw.Image(logo, width: style.logoSize, height: style.logoSize, fit: pw.BoxFit.contain)),
         if (logo != null) pw.SizedBox(height: 4),
         for (final l in receiptLines(r)) draw(l),
         pw.SizedBox(height: 6),
@@ -920,12 +991,14 @@ class ReceiptPaper extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const mono = TextStyle(fontFamily: 'monospace', fontSize: 13, height: 1.35);
     final style = ReceiptStyle.of(r.company);
+    final mono = style.font == 'mono'
+        ? const TextStyle(fontFamily: 'monospace', fontSize: 13, height: 1.35)
+        : const TextStyle(fontSize: 13, height: 1.35);
     TextStyle st(RLine l) => mono.copyWith(
         fontStyle: l.italic ? FontStyle.italic : null,
         fontWeight: l.bold ? FontWeight.w800 : null,
-        fontSize: (l.size <= 0 ? 13 : (l.size + 4).clamp(10, 18).toDouble()) * style.fontScale);
+        fontSize: (l.size <= 0 ? 13 : (l.size + 4).clamp(10, 26).toDouble()) * style.fontScale);
     Widget draw(RLine l) {
       switch (l.kind) {
         case 'divider':
@@ -934,7 +1007,7 @@ class ReceiptPaper extends StatelessWidget {
           return const SizedBox(height: 6);
         case 'row':
           return Padding(
-            padding: const EdgeInsets.symmetric(vertical: 1),
+            padding: EdgeInsets.symmetric(vertical: 0.5 + style.lineGap * 0.6),
             child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Expanded(child: Text(l.left, style: st(l))),
               Text(l.right ?? '', style: st(l)),
@@ -963,10 +1036,13 @@ class ReceiptPaper extends StatelessWidget {
           boxShadow: const [BoxShadow(color: Color(0x14000000), blurRadius: 6, offset: Offset(0, 2))]),
       child: Column(children: [
         if (logo.isNotEmpty && style.logo != 'hide')
-          Padding(
-              padding: const EdgeInsets.only(bottom: 6),
-              child: Image.network(logo,
-                  width: style.logoSize * 1.15, height: style.logoSize * 1.15, errorBuilder: (_, __, ___) => const SizedBox())),
+          Align(
+            alignment: style.logoAlign < 0 ? Alignment.centerLeft : (style.logoAlign > 0 ? Alignment.centerRight : Alignment.center),
+            child: Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Image.network(logo,
+                    width: style.logoSize * 1.15, height: style.logoSize * 1.15, errorBuilder: (_, __, ___) => const SizedBox())),
+          ),
         for (final l in receiptLines(r)) draw(l),
       ]),
     );

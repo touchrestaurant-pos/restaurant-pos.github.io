@@ -497,6 +497,7 @@ class _SuppliersTabState extends State<_SuppliersTab> {
         Expanded(
             child: Text('You owe suppliers ${money(owing)}',
                 style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: owing > 0 ? Brand.red : Brand.green))),
+        IconButton(tooltip: 'Transactions and analysis', onPressed: () => openAllSuppliersAnalysis(context), icon: const Icon(Icons.insights)),
         IconButton(tooltip: 'Print the creditors list', onPressed: suppliers.isEmpty ? null : () => _printList(suppliers), icon: const Icon(Icons.print_outlined)),
         IconButton(onPressed: _load, icon: const Icon(Icons.refresh)),
       ]),

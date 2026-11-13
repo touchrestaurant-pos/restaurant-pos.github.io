@@ -17,6 +17,7 @@ class LedgerLine {
     this.group = '',
     this.muted = false,
     this.tag = '',
+    this.party = '',
   });
   final String date;
   final String what;
@@ -30,6 +31,9 @@ class LedgerLine {
   /// Shown greyed out and struck through (does not count).
   final bool muted;
   final String tag;
+
+  /// Who it belongs to, on a combined statement of all customers or all suppliers.
+  final String party;
 }
 
 /// A statement for one customer (debtor) or supplier (creditor). Both kinds are
@@ -70,6 +74,91 @@ class Ledger {
 
   double get totalCharges => lines.fold(0, (s, l) => s + (l.muted ? 0 : l.charge));
   double get totalPaid => lines.fold(0, (s, l) => s + l.paid);
+}
+
+/// Numbers worked out from a statement's lines, for the analysis view and the printout.
+class LedgerStats {
+  const LedgerStats({
+    required this.chargeCount,
+    required this.paymentCount,
+    required this.avgCharge,
+    required this.avgPayment,
+    this.largestCharge,
+    this.largestPayment,
+    this.avgDaysToPay,
+    this.oldestOpenDays,
+    required this.paidShare,
+    required this.perMonthCharge,
+  });
+  final int chargeCount;
+  final int paymentCount;
+  final double avgCharge;
+  final double avgPayment;
+  final LedgerLine? largestCharge;
+  final LedgerLine? largestPayment;
+
+  /// Average days between an item and the payment that settled it, oldest item paid first.
+  final double? avgDaysToPay;
+
+  /// Age in days of the oldest item still unpaid at the end of the period.
+  final int? oldestOpenDays;
+
+  /// Payments as a share of what was charged in the period (0 to 1+).
+  final double paidShare;
+  final double perMonthCharge;
+}
+
+LedgerStats analyseLedger(Ledger g) {
+  final charges = g.lines.where((l) => !l.muted && l.charge > 0).toList();
+  final pays = g.lines.where((l) => l.paid > 0).toList();
+  LedgerLine? biggest(List<LedgerLine> xs, double Function(LedgerLine) f) {
+    LedgerLine? best;
+    for (final x in xs) {
+      if (best == null || f(x) > f(best)) best = x;
+    }
+    return best;
+  }
+
+  // Pay the oldest items first and see how long each took.
+  final open = <(DateTime, double)>[];
+  final start = DateTime.tryParse(g.from);
+  if (g.opening > 0.005 && start != null) open.add((start, g.opening));
+  var weighted = 0.0, settled = 0.0;
+  for (final l in g.lines) {
+    final d = DateTime.tryParse(l.date);
+    if (d == null) continue;
+    if (!l.muted && l.charge > 0) open.add((d, l.charge));
+    var left = l.paid;
+    while (left > 0.005 && open.isNotEmpty) {
+      final take = left < open.first.$2 ? left : open.first.$2;
+      weighted += take * d.difference(open.first.$1).inDays;
+      settled += take;
+      left -= take;
+      if (take >= open.first.$2 - 0.005) {
+        open.removeAt(0);
+      } else {
+        open[0] = (open.first.$1, open.first.$2 - take);
+      }
+    }
+  }
+  final end = DateTime.tryParse(g.to);
+  final today = DateTime.now();
+  final asAt = end == null ? today : (end.isAfter(today) ? today : end);
+  final months = start == null || end == null
+      ? 1.0
+      : ((end.difference(start).inDays + 1) / 30.4).clamp(1.0, 1000.0);
+  return LedgerStats(
+    chargeCount: charges.length,
+    paymentCount: pays.length,
+    avgCharge: charges.isEmpty ? 0 : g.totalCharges / charges.length,
+    avgPayment: pays.isEmpty ? 0 : g.totalPaid / pays.length,
+    largestCharge: biggest(charges, (l) => l.charge),
+    largestPayment: biggest(pays, (l) => l.paid),
+    avgDaysToPay: settled > 0.005 ? weighted / settled : null,
+    oldestOpenDays: open.isEmpty ? null : asAt.difference(open.first.$1).inDays,
+    paidShare: g.totalCharges > 0.005 ? g.totalPaid / g.totalCharges : 0,
+    perMonthCharge: g.totalCharges / months,
+  );
 }
 
 String _day(dynamic v) => '${v ?? ''}'.split('T').first;
@@ -212,6 +301,18 @@ Future<Uint8List> ledgerPdf(Ledger g) async {
               ? 'Overpaid: ${money(-g.closing)} is in credit.'
               : (g.closing > 0.004 ? 'Amount ${g.owedWord}: ${money(g.closing)}' : 'Nothing ${g.owedWord}.'),
           style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+      ...(() {
+        final st = analyseLedger(g);
+        if (st.chargeCount + st.paymentCount == 0) return <pw.Widget>[];
+        return <pw.Widget>[
+          pw.SizedBox(height: 6),
+          pw.Text(
+              '${st.chargeCount} ${g.chargeLabel.toLowerCase()} averaging ${money(st.avgCharge)} · ${st.paymentCount} payments averaging ${money(st.avgPayment)}'
+              '${st.avgDaysToPay == null ? '' : ' · paid on average after ${st.avgDaysToPay!.round()} days'}'
+              '${st.oldestOpenDays == null ? '' : ' · oldest unpaid item ${st.oldestOpenDays} days old'}',
+              style: const pw.TextStyle(fontSize: 8)),
+        ];
+      })(),
       if (g.ageing != null) ...[
         pw.SizedBox(height: 12),
         pw.Text('Amount owing by age', style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),

@@ -1255,6 +1255,11 @@ class _SuppliersTabState extends State<_SuppliersTab> {
             FilledButton.icon(onPressed: () => _edit(context, null), icon: const Icon(Icons.add), label: const Text('Add supplier')),
             if (_money)
               OutlinedButton.icon(
+                  onPressed: () => openAllSuppliersAnalysis(context),
+                  icon: const Icon(Icons.insights),
+                  label: const Text('Transactions and analysis')),
+            if (_money)
+              OutlinedButton.icon(
                   onPressed: all.isEmpty ? null : () => _printList(shown),
                   icon: const Icon(Icons.print_outlined),
                   label: const Text('Print list')),

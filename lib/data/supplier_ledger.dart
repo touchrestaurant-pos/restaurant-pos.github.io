@@ -3,6 +3,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../receipt/ledger.dart';
 import '../widgets/ledger_statement.dart';
+import 'accounts_repo.dart';
 import 'local_store.dart';
 import 'repo.dart';
 
@@ -195,3 +196,126 @@ Future<bool> recordSupplierPayment(BuildContext context,
   }
 
 
+
+
+/// Every supplier together: what was bought and paid between two dates, one running total.
+Future<Ledger> loadAllSuppliersLedger(DateTime from, DateTime to) async {
+  final db = Supabase.instance.client;
+  final grvs = List<Map<String, dynamic>>.from(await db
+      .from('grvs')
+      .select('grv_no, supplier_id, received_on, total, status, created_at')
+      .inFilter('status', ['posted']));
+  final pays = List<Map<String, dynamic>>.from(
+      await db.from('supplier_payments').select('supplier_id, amount, method, paid_on, note, created_at'));
+  String name(dynamic id) => '${LocalStore.row('suppliers', id)?['name'] ?? 'Supplier'}';
+  final entries = <Map<String, dynamic>>[
+    for (final g in grvs)
+      {
+        'date': '${g['received_on']}',
+        'at': '${g['created_at']}',
+        'what': '${name(g['supplier_id'])} · Delivery ${g['grv_no']}',
+        'party': name(g['supplier_id']),
+        'charge': n(g['total']).toDouble(),
+        'paid': 0.0,
+        'group': '',
+      },
+    for (final p in pays)
+      {
+        'date': '${p['paid_on']}',
+        'at': '${p['created_at']}',
+        'what': '${name(p['supplier_id'])} · ${_methodNames[p['method']] ?? p['method']}${'${p['note'] ?? ''}'.isEmpty ? '' : ' · ${p['note']}'}',
+        'party': name(p['supplier_id']),
+        'charge': 0.0,
+        'paid': n(p['amount']).toDouble(),
+        'group': '${_methodNames[p['method']] ?? p['method']}'.replaceAll(' payment', ''),
+      },
+  ]..sort((a, b) {
+      final c = '${a['date']}'.compareTo('${b['date']}');
+      return c != 0 ? c : '${a['at']}'.compareTo('${b['at']}');
+    });
+  return _combine('All suppliers', 'Creditors transactions', entries, from, to,
+      chargeLabel: 'Bought', paidLabel: 'Paid and credited', owedWord: 'we owe');
+}
+
+Ledger _combine(String name, String title, List<Map<String, dynamic>> entries, DateTime from, DateTime to,
+    {required String chargeLabel, required String paidLabel, required String owedWord}) {
+  final f = _d(from), t = _d(to);
+  var bal = 0.0, opening = 0.0;
+  final lines = <LedgerLine>[];
+  for (final e in entries) {
+    bal = round2(bal + (e['charge'] as double) - (e['paid'] as double));
+    final date = e['date'] as String;
+    if (date.compareTo(f) < 0) {
+      opening = bal;
+    } else if (date.compareTo(t) <= 0) {
+      lines.add(LedgerLine(
+          date: date,
+          what: e['what'] as String,
+          charge: e['charge'] as double,
+          paid: e['paid'] as double,
+          balance: bal,
+          group: e['group'] as String,
+          party: e['party'] as String));
+    }
+  }
+  return Ledger(
+    partyName: name,
+    from: f,
+    to: t,
+    opening: opening,
+    closing: lines.isEmpty ? opening : lines.last.balance,
+    lines: lines,
+    title: title,
+    chargeLabel: chargeLabel,
+    paidLabel: paidLabel,
+    owedWord: owedWord,
+    footer: 'Combined record of every ${chargeLabel == 'Sales' ? 'customer account' : 'supplier'} for the period.',
+  );
+}
+
+/// Every customer account together, from the account ledger.
+Future<Ledger> loadAllAccountsLedger(DateTime from, DateTime to) async {
+  final db = Supabase.instance.client;
+  final accounts = {for (final a in await AccountsRepo.ageing()) '${a['id']}': '${a['name']}'};
+  final tx = List<Map<String, dynamic>>.from(await db
+      .from('account_transactions')
+      .select('account_id, kind, amount, method, reference, business_date, created_at, orders(order_ref, invoice_no)'));
+  const kinds = {
+    'sale': 'Sale',
+    'payment': 'Payment received',
+    'credit_note': 'Credit note',
+    'writeoff': 'Written off',
+    'writeoff_reversal': 'Write-off reversed',
+    'credit_refund': 'Credit paid back',
+  };
+  final entries = <Map<String, dynamic>>[
+    for (final x in tx)
+      () {
+        final amt = n(x['amount']).toDouble();
+        final k = kinds[x['kind']] ?? '${x['kind']}';
+        final o = x['orders'] is Map ? x['orders'] as Map : const {};
+        final ref = '${o['invoice_no'] ?? o['order_ref'] ?? ''}';
+        final who = accounts['${x['account_id']}'] ?? 'Account';
+        return {
+          'date': '${x['business_date']}',
+          'at': '${x['created_at']}',
+          'what': '$who · $k${ref.isEmpty ? '' : ' $ref'}${x['method'] == null ? '' : ' (${x['method']})'}',
+          'party': who,
+          'charge': amt > 0 ? amt : 0.0,
+          'paid': amt < 0 ? -amt : 0.0,
+          'group': k,
+        };
+      }(),
+  ]..sort((a, b) {
+      final c = '${a['date']}'.compareTo('${b['date']}');
+      return c != 0 ? c : '${a['at']}'.compareTo('${b['at']}');
+    });
+  return _combine('All customers', 'Debtors transactions', entries, from, to,
+      chargeLabel: 'Sales', paidLabel: 'Payments and credits', owedWord: 'owing');
+}
+
+Future<void> openAllSuppliersAnalysis(BuildContext context) => showLedgerStatement(context,
+    heading: 'All suppliers', initialPreset: 'This year', fileName: 'Creditors-transactions', load: loadAllSuppliersLedger);
+
+Future<void> openAllAccountsAnalysis(BuildContext context) => showLedgerStatement(context,
+    heading: 'All customers', initialPreset: 'This year', fileName: 'Debtors-transactions', load: loadAllAccountsLedger);
