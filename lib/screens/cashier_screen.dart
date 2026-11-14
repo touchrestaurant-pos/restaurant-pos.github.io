@@ -1384,10 +1384,9 @@ class _CancelDialogState extends State<_CancelDialog> {
     setState(() => _busy = true);
     try {
       await SyncService.instance.syncNow(); // make sure the order and payments are on the server
-      final db = Supabase.instance.client;
       final pays = OrderRepo.paymentsFor(id);
       final acctPaid = round2(pays.where((p) => p['method'] == 'account').fold<double>(0, (s, p) => s + n(p['amount']).toDouble()));
-      final already = await db.from('refunds').select('amount,method').eq('order_id', id);
+      final already = await AppDb.from('refunds').select('amount,method').eq('order_id', id);
       final refunded = already.fold<double>(0, (s, r) => s + n(r['amount']).toDouble());
       final acctBack = already.where((r) => r['method'] == 'account').fold<double>(0, (s, r) => s + n(r['amount']).toDouble());
       final toRefund = round2(paidAmount - refunded);
@@ -1415,7 +1414,7 @@ class _CancelDialogState extends State<_CancelDialog> {
       for (final e in byMethod.entries) {
         await refund(round2(e.value), e.key);
       }
-      await db.from('orders').update({'status': 'void', 'void_reason': text}).eq('id', id);
+      await AppDb.from('orders').update({'status': 'void', 'void_reason': text}).eq('id', id);
       await SyncService.instance.syncNow();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(

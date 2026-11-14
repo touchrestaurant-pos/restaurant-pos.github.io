@@ -112,6 +112,21 @@ class PgQuery implements Future<dynamic> {
     return this;
   }
 
+  PgQuery lt(String col, dynamic val) {
+    _conds.add(_Cond(col, '<', val));
+    return this;
+  }
+
+  PgQuery ilike(String col, String pattern) {
+    _conds.add(_Cond(col, 'ILIKE', pattern));
+    return this;
+  }
+
+  PgQuery inFilter(String col, List<dynamic> values) {
+    _conds.add(_Cond(col, 'IN_LIST', values));
+    return this;
+  }
+
   PgQuery order(String col, {bool ascending = true}) {
     _orderCol = col;
     _orderAsc = ascending;
@@ -140,8 +155,14 @@ class PgQuery implements Future<dynamic> {
     for (var i = 0; i < _conds.length; i++) {
       final c = _conds[i];
       final key = 'w${i}_${c.col}';
-      parts.add('${c.col} ${c.op} @$key');
-      params[key] = c.val;
+      if (c.op == 'IN_LIST') {
+        // Cast to text so this also works against enum columns (e.g. status).
+        parts.add('${c.col}::text = ANY(@$key)');
+        params[key] = (c.val as List).map((v) => '$v').toList();
+      } else {
+        parts.add('${c.col} ${c.op} @$key');
+        params[key] = c.val;
+      }
     }
     return (parts.isEmpty ? '' : ' WHERE ${parts.join(' AND ')}', params);
   }

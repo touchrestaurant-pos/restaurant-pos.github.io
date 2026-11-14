@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../auth/auth_service.dart';
 import '../receipt/ledger.dart';
 import '../widgets/ledger_statement.dart';
 import 'accounts_repo.dart';
+import 'db_profiles.dart';
 import 'local_store.dart';
 import 'repo.dart';
 import 'app_db.dart';
@@ -14,14 +16,11 @@ const _methodNames = {'eft': 'EFT payment', 'cash': 'Cash payment', 'card': 'Car
 
 /// What we owe one supplier between two dates: deliveries raise it, payments and credit notes lower it.
 Future<Ledger> loadSupplierLedger(String supplierId, DateTime from, DateTime to) async {
-  final db = Supabase.instance.client;
-  final grvs = List<Map<String, dynamic>>.from(await db
-      .from('grvs')
+  final grvs = List<Map<String, dynamic>>.from(await AppDb.from('grvs')
       .select('id, grv_no, received_on, delivery_note, total, status, created_at')
       .eq('supplier_id', supplierId)
       .inFilter('status', ['posted', 'reversed']));
-  final pays = List<Map<String, dynamic>>.from(await db
-      .from('supplier_payments')
+  final pays = List<Map<String, dynamic>>.from(await AppDb.from('supplier_payments')
       .select('id, grv_id, amount, method, paid_on, note, created_at')
       .eq('supplier_id', supplierId));
   final grvNo = {for (final g in grvs) g['id']: '${g['grv_no']}'};
@@ -215,13 +214,11 @@ Future<bool> recordSupplierPayment(BuildContext context,
 
 /// Every supplier together: what was bought and paid between two dates, one running total.
 Future<Ledger> loadAllSuppliersLedger(DateTime from, DateTime to) async {
-  final db = Supabase.instance.client;
-  final grvs = List<Map<String, dynamic>>.from(await db
-      .from('grvs')
+  final grvs = List<Map<String, dynamic>>.from(await AppDb.from('grvs')
       .select('grv_no, supplier_id, received_on, total, status, created_at')
       .inFilter('status', ['posted']));
   final pays = List<Map<String, dynamic>>.from(
-      await db.from('supplier_payments').select('supplier_id, amount, method, paid_on, note, created_at'));
+      await AppDb.from('supplier_payments').select('supplier_id, amount, method, paid_on, note, created_at'));
   String name(dynamic id) => '${LocalStore.row('suppliers', id)?['name'] ?? 'Supplier'}';
   final entries = <Map<String, dynamic>>[
     for (final g in grvs)
@@ -290,11 +287,21 @@ Ledger _combine(String name, String title, List<Map<String, dynamic>> entries, D
 
 /// Every customer account together, from the account ledger.
 Future<Ledger> loadAllAccountsLedger(DateTime from, DateTime to) async {
-  final db = Supabase.instance.client;
   final accounts = {for (final a in await AccountsRepo.ageing()) '${a['id']}': '${a['name']}'};
-  final tx = List<Map<String, dynamic>>.from(await db
-      .from('account_transactions')
-      .select('account_id, kind, amount, method, reference, business_date, created_at, orders(order_ref, invoice_no)'));
+  List<Map<String, dynamic>> tx;
+  if (DbProfiles.isPostgres) {
+    final pg = AuthService.instance.pgClient;
+    if (pg == null) throw Exception('Database not connected.');
+    tx = await pg.query(
+      'SELECT t.account_id, t.kind, t.amount, t.method, t.reference, t.business_date, t.created_at, '
+      'CASE WHEN o.id IS NULL THEN NULL ELSE jsonb_build_object(\'order_ref\', o.order_ref, \'invoice_no\', o.invoice_no) END AS orders '
+      'FROM public.account_transactions t LEFT JOIN public.orders o ON o.id = t.order_id',
+    );
+  } else {
+    tx = List<Map<String, dynamic>>.from(await Supabase.instance.client
+        .from('account_transactions')
+        .select('account_id, kind, amount, method, reference, business_date, created_at, orders(order_ref, invoice_no)'));
+  }
   const kinds = {
     'sale': 'Sale',
     'payment': 'Payment received',

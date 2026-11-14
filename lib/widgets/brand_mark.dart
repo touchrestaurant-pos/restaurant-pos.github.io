@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
 import '../data/repo.dart';
@@ -41,15 +43,24 @@ class BrandMark extends StatelessWidget {
       ),
     );
     if (url.isEmpty) return fallback;
+    final image = url.startsWith('http')
+        ? Image.network(
+            url,
+            width: size,
+            height: size,
+            fit: BoxFit.cover,
+            errorBuilder: (_, __, ___) => fallback,
+          )
+        : Image.file(
+            File(url),
+            width: size,
+            height: size,
+            fit: BoxFit.cover,
+            errorBuilder: (_, __, ___) => fallback,
+          );
     return ClipRRect(
       borderRadius: BorderRadius.circular(size * 0.26),
-      child: Image.network(
-        url,
-        width: size,
-        height: size,
-        fit: BoxFit.cover,
-        errorBuilder: (_, __, ___) => fallback,
-      ),
+      child: image,
     );
   }
 }

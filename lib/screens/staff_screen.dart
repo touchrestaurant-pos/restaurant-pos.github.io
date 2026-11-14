@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../auth/auth_service.dart';
+import '../data/app_db.dart';
+import '../data/db_profiles.dart';
 import '../data/local_store.dart';
 import '../data/sync_service.dart';
 import '../auth/permissions.dart';
@@ -18,6 +20,7 @@ const roleLabels = {
 /// Calls the create-staff function (add staff, reset a password).
 /// Returns null on success, otherwise a message to show.
 Future<String?> _callStaffFunction(Map<String, dynamic> body) async {
+  if (DbProfiles.isPostgres) return _callStaffFunctionLocal(body);
   try {
     final res =
         await Supabase.instance.client.functions.invoke('create-staff', body: body);
@@ -31,6 +34,59 @@ Future<String?> _callStaffFunction(Map<String, dynamic> body) async {
         : 'Could not complete this (${e.status}).';
   } catch (_) {
     return 'Cannot reach the server. This needs internet.';
+  }
+}
+
+/// The local-database equivalent of the create-staff edge function — the
+/// same checks, done with plain SQL over the local connection instead of
+/// a call to Supabase's servers.
+Future<String?> _callStaffFunctionLocal(Map<String, dynamic> body) async {
+  final pg = AuthService.instance.pgClient;
+  if (pg == null) return 'Database not connected.';
+  final password = '${body['password'] ?? ''}';
+  if (password.length < 6) return 'Password must be at least 6 characters';
+  final action = '${body['action'] ?? 'create'}';
+  try {
+    if (action == 'reset') {
+      final userId = '${body['user_id'] ?? ''}';
+      final target = await pg.query(
+        'SELECT id FROM public.staff_profiles WHERE id = @id', {'id': userId});
+      if (target.isEmpty) return 'Staff member not found';
+      await pg.execute(
+        "UPDATE auth.users SET encrypted_password = crypt(@pw, gen_salt('bf')) WHERE id = @id",
+        {'pw': password, 'id': userId},
+      );
+      return null;
+    }
+    if (action != 'create') return 'Unknown action';
+    final fullName = '${body['full_name'] ?? ''}'.trim();
+    final username = '${body['username'] ?? ''}'.trim().toLowerCase();
+    final role = '${body['role'] ?? 'cashier'}';
+    if (fullName.isEmpty) return "Enter the staff member's name";
+    if (!RegExp(r'^[a-z0-9._-]{3,30}$').hasMatch(username)) {
+      return 'Username must be 3 to 30 letters, numbers, dots, dashes or underscores';
+    }
+    if (!roleLabels.containsKey(role)) return 'Unknown role';
+    final taken = await pg.query(
+      'SELECT id FROM public.staff_profiles WHERE username ILIKE @u', {'u': username});
+    if (taken.isNotEmpty) return 'That username is already taken';
+    final email = '$username@store.local';
+    final inserted = await pg.query(
+      "INSERT INTO auth.users (email, encrypted_password, raw_user_meta_data) "
+      "VALUES (@email, crypt(@pw, gen_salt('bf')), jsonb_build_object('full_name', @name, 'username', @user)) "
+      "RETURNING id",
+      {'email': email, 'pw': password, 'name': fullName, 'user': username},
+    );
+    final newId = '${inserted.first['id']}';
+    // The handle_new_user trigger just created the profile as "cashier";
+    // set the chosen role and the details actually typed in.
+    await pg.execute(
+      'UPDATE public.staff_profiles SET role = @role::public.app_role, full_name = @name, username = @user WHERE id = @id',
+      {'role': role, 'name': fullName, 'user': username, 'id': newId},
+    );
+    return null;
+  } catch (e) {
+    return '$e';
   }
 }
 

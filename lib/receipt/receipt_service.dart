@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
@@ -11,6 +12,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../auth/auth_service.dart';
 import '../auth/permissions.dart';
+import '../data/app_db.dart';
 import '../data/local_store.dart';
 import '../data/repo.dart';
 import '../data/sync_service.dart';
@@ -482,9 +484,9 @@ Future<Uint8List> receiptPdf(ReceiptData r) async {
   final url = '${c['logo_url'] ?? ''}';
   if (url.isNotEmpty) {
     try {
-      logo = await networkImage(url);
+      logo = url.startsWith('http') ? await networkImage(url) : pw.MemoryImage(await File(url).readAsBytes());
     } catch (_) {
-      logo = null; // print without the logo if it cannot be fetched
+      logo = null; // print without the logo if it cannot be loaded
     }
   }
   final small = slipPaperMm() == 58;
@@ -687,7 +689,7 @@ Future<void> maybePrintKitchenTicket(String orderId, {Set<dynamic>? onlyItemIds}
 /// Print the kitchen slip again (even when automatic kitchen printing is off) and record who did it.
 Future<void> reprintKitchenTicket(String orderId) async {
   try {
-    await Supabase.instance.client.rpc('log_reprint', params: {'p_order': orderId});
+    await AppDb.rpc('log_reprint', params: {'p_order': orderId});
   } catch (_) {
     // Offline: the slip still prints.
   }
@@ -762,8 +764,7 @@ class _ReceiptDialogState extends State<_ReceiptDialog> {
   Future<void> _loadRefunds() async {
     if (!_canRefund) return;
     try {
-      final rows = await Supabase.instance.client
-          .from('refunds')
+      final rows = await AppDb.from('refunds')
           .select('amount, credit_note_no')
           .eq('order_id', widget.orderId)
           .order('created_at');
@@ -896,7 +897,7 @@ class _ReceiptDialogState extends State<_ReceiptDialog> {
     );
     if (ok != true) return;
     try {
-      await Supabase.instance.client.rpc('issue_refund', params: {
+      await AppDb.rpc('issue_refund', params: {
         'p_order_id': widget.orderId,
         'p_amount': double.parse(amount.text.replaceAll(',', '.')),
         'p_method': method,
@@ -1046,7 +1047,10 @@ class ReceiptPaper extends StatelessWidget {
             alignment: style.logoAlign < 0 ? Alignment.centerLeft : (style.logoAlign > 0 ? Alignment.centerRight : Alignment.center),
             child: Padding(
                 padding: const EdgeInsets.only(bottom: 6),
-                child: Image.network(logo,
+                child: logo.startsWith('http')
+                ? Image.network(logo,
+                    width: style.logoSize * 1.15, height: style.logoSize * 1.15, errorBuilder: (_, __, ___) => const SizedBox())
+                : Image.file(File(logo),
                     width: style.logoSize * 1.15, height: style.logoSize * 1.15, errorBuilder: (_, __, ___) => const SizedBox())),
           ),
         for (final l in receiptLines(r)) draw(l),

@@ -1,7 +1,10 @@
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../auth/auth_service.dart';
 import '../config.dart';
+import '../data/app_db.dart';
+import '../data/db_profiles.dart';
 import '../data/local_store.dart';
 
 /// Records app errors on the device and, when online, in the app_errors table
@@ -25,10 +28,11 @@ class ErrorLog {
     if (_lastSent != null && now.difference(_lastSent!) < const Duration(seconds: 5)) return;
     _lastSent = now;
     try {
-      final db = Supabase.instance.client;
-      final uid = db.auth.currentUser?.id;
+      final uid = DbProfiles.isPostgres
+          ? AuthService.instance.localUserId
+          : Supabase.instance.client.auth.currentUser?.id;
       if (uid == null) return;
-      await db.from('app_errors').insert({
+      await AppDb.from('app_errors').insert({
         'user_id': uid,
         'message': message.length > 2000 ? message.substring(0, 2000) : message,
         'details': details,
@@ -36,7 +40,7 @@ class ErrorLog {
         'app_version': AppConfig.appVersion,
       });
     } catch (_) {
-      // Offline: it stays in the device list.
+      // Offline/cloud unreachable: it stays in the device list.
     }
   }
 }

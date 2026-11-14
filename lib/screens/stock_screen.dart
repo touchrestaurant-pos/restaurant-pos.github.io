@@ -122,8 +122,7 @@ class _LevelsTabState extends State<_LevelsTab> {
   /// When the last posted stock-take was, so the screen can remind the owner to count.
   Future<void> _checkLastCount() async {
     try {
-      final rows = await Supabase.instance.client
-          .from('stocktakes')
+      final rows = await AppDb.from('stocktakes')
           .select('created_at')
           .eq('status', 'posted')
           .order('created_at', ascending: false)

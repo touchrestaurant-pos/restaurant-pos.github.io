@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../auth/auth_service.dart';
+import '../data/db_profiles.dart';
 import '../data/local_store.dart';
 import '../data/repo.dart';
 import '../data/sync_service.dart';
@@ -60,14 +62,36 @@ class _OrdersScreenState extends State<OrdersScreen> {
       _error = null;
     });
     try {
-      var q = Supabase.instance.client
-          .from('orders')
-          .select('*, order_items(*), payments(*)')
-          .gte('created_at', DateTime(from.year, from.month, from.day).toUtc().toIso8601String())
-          .lt('created_at', DateTime(to.year, to.month, to.day + 1).toUtc().toIso8601String());
-      if (_search.trim().isNotEmpty) q = q.ilike('order_ref', '%${_search.trim()}%');
-      final rows = await q.order('created_at', ascending: false).limit(500);
-      _server = rows.map((e) => Map<String, dynamic>.from(e)).toList();
+      final fromIso = DateTime(from.year, from.month, from.day).toUtc().toIso8601String();
+      final toIso = DateTime(to.year, to.month, to.day + 1).toUtc().toIso8601String();
+      final search = _search.trim();
+      if (DbProfiles.isPostgres) {
+        final pg = AuthService.instance.pgClient;
+        if (pg == null) throw Exception('Database not connected.');
+        final params = <String, dynamic>{'from': fromIso, 'to': toIso};
+        var where = 'o.created_at >= @from AND o.created_at < @to';
+        if (search.isNotEmpty) {
+          where += ' AND o.order_ref ILIKE @search';
+          params['search'] = '%$search%';
+        }
+        final rows = await pg.query(
+          'SELECT o.*, '
+          "(SELECT COALESCE(jsonb_agg(to_jsonb(oi)), '[]'::jsonb) FROM public.order_items oi WHERE oi.order_id = o.id) AS order_items, "
+          "(SELECT COALESCE(jsonb_agg(to_jsonb(p)), '[]'::jsonb) FROM public.payments p WHERE p.order_id = o.id) AS payments "
+          'FROM public.orders o WHERE $where ORDER BY o.created_at DESC LIMIT 500',
+          params,
+        );
+        _server = rows;
+      } else {
+        var q = Supabase.instance.client
+            .from('orders')
+            .select('*, order_items(*), payments(*)')
+            .gte('created_at', fromIso)
+            .lt('created_at', toIso);
+        if (search.isNotEmpty) q = q.ilike('order_ref', '%$search%');
+        final rows = await q.order('created_at', ascending: false).limit(500);
+        _server = rows.map((e) => Map<String, dynamic>.from(e)).toList();
+      }
     } on PostgrestException catch (e) {
       _error = e.message;
     } catch (_) {

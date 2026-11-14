@@ -1,7 +1,10 @@
+import 'dart:io';
+
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../data/db_profiles.dart';
 import '../data/local_store.dart';
 import '../data/repo.dart';
 import '../data/sync_service.dart';
@@ -146,11 +149,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
             : 'image/png';
     setState(() => _busy = true);
     try {
-      final storage = Supabase.instance.client.storage.from('company-assets');
-      final path = 'logo-${DateTime.now().millisecondsSinceEpoch}.$ext';
-      await storage.uploadBinary(path, bytes,
-          fileOptions: FileOptions(contentType: mime, upsert: true));
-      final url = storage.getPublicUrl(path);
+      String url;
+      if (DbProfiles.isPostgres) {
+        // No Supabase Storage locally: save the image next to the app's
+        // own data and keep its file path instead of a hosted URL.
+        final base = Platform.environment['LOCALAPPDATA'] ??
+            Platform.environment['APPDATA'] ??
+            Directory.systemTemp.path;
+        final folder = Directory('$base${Platform.pathSeparator}RestoPOS${Platform.pathSeparator}logos');
+        await folder.create(recursive: true);
+        final path = '${folder.path}${Platform.pathSeparator}logo-${DateTime.now().millisecondsSinceEpoch}.$ext';
+        await File(path).writeAsBytes(bytes);
+        url = path;
+      } else {
+        final storage = Supabase.instance.client.storage.from('company-assets');
+        final path = 'logo-${DateTime.now().millisecondsSinceEpoch}.$ext';
+        await storage.uploadBinary(path, bytes,
+            fileOptions: FileOptions(contentType: mime, upsert: true));
+        url = storage.getPublicUrl(path);
+      }
       await LocalStore.upsert('company_settings', {
         ...(companyRow() ?? {'id': 1}),
         'id': 1,

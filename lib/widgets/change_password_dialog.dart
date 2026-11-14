@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../auth/auth_service.dart';
+import '../data/db_profiles.dart';
 import '../theme.dart';
 
 /// Lets the signed-in person choose their own new password.
@@ -49,8 +51,18 @@ class _ChangePasswordDialogState extends State<_ChangePasswordDialog> {
       _error = null;
     });
     try {
-      await Supabase.instance.client.auth
-          .updateUser(UserAttributes(password: _one.text));
+      if (DbProfiles.isPostgres) {
+        final pg = AuthService.instance.pgClient;
+        final uid = AuthService.instance.localUserId;
+        if (pg == null || uid == null) throw Exception('Database not connected.');
+        await pg.execute(
+          "UPDATE auth.users SET encrypted_password = crypt(@pw, gen_salt('bf')) WHERE id = @id",
+          {'pw': _one.text, 'id': uid},
+        );
+      } else {
+        await Supabase.instance.client.auth
+            .updateUser(UserAttributes(password: _one.text));
+      }
       if (mounted) Navigator.pop(context, true);
     } on AuthException catch (e) {
       setState(() {

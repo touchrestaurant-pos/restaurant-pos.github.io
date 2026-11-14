@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../data/app_db.dart';
+
 import '../theme.dart';
 
 /// A manager or supervisor sets the PIN they use to approve things at the till.
@@ -11,7 +13,7 @@ Future<void> showSetApprovalPinDialog(BuildContext context) async {
   bool busy = false;
   bool has = false;
   try {
-    has = (await Supabase.instance.client.rpc('has_approval_pin')) == true;
+    has = (await AppDb.rpc('has_approval_pin')) == true;
   } catch (_) {}
   if (!context.mounted) return;
   final ok = await showDialog<bool>(
@@ -60,7 +62,7 @@ Future<void> showSetApprovalPinDialog(BuildContext context) async {
                       error = null;
                     });
                     try {
-                      await Supabase.instance.client.rpc('set_approval_pin', params: {'p_pin': one.text});
+                      await AppDb.rpc('set_approval_pin', params: {'p_pin': one.text});
                       if (ctx.mounted) Navigator.pop(ctx, true);
                     } on PostgrestException catch (e) {
                       set(() {

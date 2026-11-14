@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../data/app_db.dart';
 import '../data/local_store.dart';
 import '../data/repo.dart';
 import '../theme.dart';
@@ -114,8 +115,7 @@ class _ViewState extends State<_View> {
     try {
       // Everything from the start of the range up to now is read, so the balance after each
       // movement can be worked back exactly from what is on hand today.
-      var q = Supabase.instance.client
-          .from('stock_movements')
+      var q = AppDb.from('stock_movements')
           .select('id,qty_change,reason,ref_id,note,created_by,created_at')
           .eq('stock_item_id', widget.item['id']);
       final f = _rangeFrom();
