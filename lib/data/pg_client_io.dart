@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:postgres/postgres.dart';
 
 /// Wraps the `postgres` package connection with a simpler API that matches
@@ -92,7 +93,14 @@ class PgClient {
     if (v is BigInt) return v.toInt();
     if (v is double || v is int || v is bool || v is String) return v;
     if (v is List) return v.map(_dartValue).toList();
-    // Numeric/Decimal comes through as String in some drivers
+    if (v is UndecodedBytes) {
+      try {
+        return utf8.decode(v.bytes);
+      } catch (_) {
+        return v.bytes.toString();
+      }
+    }
+    if (v is Map) return v;
     return '$v';
   }
 }
