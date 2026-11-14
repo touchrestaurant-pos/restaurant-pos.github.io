@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'auth/auth_service.dart';
 import 'config.dart';
+import 'data/db_profiles.dart';
 import 'data/local_store.dart';
 import 'data/sync_service.dart';
 import 'platform/error_log.dart';
@@ -18,8 +19,8 @@ Future<void> main() async {
   await LocalStore.init();
   LocalStore.currentUser = () => Supabase.instance.client.auth.currentUser?.id;
   await Supabase.initialize(
-    url: AppConfig.supabaseUrl,
-    anonKey: AppConfig.supabaseKey,
+    url: DbProfiles.url,
+    anonKey: DbProfiles.key,
   );
   await AuthService.instance.restore();
 

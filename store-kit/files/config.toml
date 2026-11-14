@@ -1,0 +1,6 @@
+# RestoPOS local store database (Supabase running on this computer).
+project_id = "restopos"
+
+[auth]
+# Staff are added from the app's Staff screen only.
+enable_signup = false

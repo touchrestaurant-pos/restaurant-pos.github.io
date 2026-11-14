@@ -52,6 +52,12 @@ class LocalStore {
     await _meta.clear();
   }
 
+  /// Removes this device's copy of the database (not the device settings). Used when switching database.
+  static Future<void> clearData() async {
+    await _cache.clear();
+    await _outbox.clear();
+  }
+
   static String newId() => _uuid.v4();
 
   // ---- cached tables ----------------------------------------------------

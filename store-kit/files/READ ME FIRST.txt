@@ -1,0 +1,41 @@
+RestoPOS Store Kit - a blank, offline database for a new store
+==============================================================
+
+What this is
+  This folder runs the store's own database on this computer, so the till works
+  with no internet at all. It is the same database system the online version uses.
+
+One-time setup on a new store computer
+  1. Install Docker Desktop (https://www.docker.com/products/docker-desktop/), default options,
+     restart if asked, then open it and wait for "Engine running".
+     In Docker Desktop Settings, tick "Start Docker Desktop when you sign in to your computer".
+  2. Copy this whole folder to the computer, for example C:\RestoPOS-Store-Kit
+  3. Double-click "1 Start store database". The first time needs internet and takes a while.
+  4. Double-click "6 Create first admin" and choose the owner's username and password.
+  5. Open the RestoPOS app. On the sign-in screen tap "Database", "Add a database",
+     and copy the address and the key from connection.txt (use the line that starts
+     with "anon key" or "Publishable key"). Choose it, close the app, open it again, sign in.
+
+Every day
+  Start: "1 Start store database" (after the computer restarts).
+  Stop:  "2 Stop store database" (optional; your data is kept either way).
+
+Backups and several stores
+  "3 Back up database" saves everything (staff, menu, stock, sales) to the backups folder.
+  "4 Restore database" replaces the database with a backup you pick.
+  "5 New blank store" wipes the database back to blank.
+  To keep a standard starting point: set up the menu and stock once, back it up as
+  "Template", and restore that file whenever you set up a new store.
+
+Other tills on the same network
+  Use the Windows app on each till and add the database with the address
+  http://IP-OF-THIS-COMPUTER:54321 (the IP is listed at the bottom of connection.txt).
+  Allow port 54321 through Windows Firewall on this computer when Windows asks.
+  The web version (in a browser) only reaches a local database from this same computer.
+
+Good to know
+  * Adding staff, EFT, account sales and reports all work locally; nothing goes online.
+  * The local database is not copied to the cloud. Backups are your only safety net:
+    back up daily and keep a copy off this computer.
+  * Updating the kit later: replace the supabase\migrations folder with the new one,
+    back up, run "5 New blank store", then restore your backup.
