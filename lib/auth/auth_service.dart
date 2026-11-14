@@ -45,6 +45,17 @@ class AuthService extends ChangeNotifier {
       if (cached is Map) {
         profile = Map<String, dynamic>.from(cached);
         _localUserId = profile?['id']?.toString();
+        // A fresh sign-in sets this on the connection (so auth.uid() and
+        // my_role() work inside SQL functions); restoring a remembered
+        // session on app start-up has to do the same, or every admin-only
+        // function raises "Not allowed" until the next full sign-in.
+        if (_localUserId != null) {
+          try {
+            await pgClient?.setCurrentUser(_localUserId);
+          } catch (_) {
+            // Database not reachable yet: signIn() will set it once it is.
+          }
+        }
       }
       return;
     }

@@ -73,7 +73,7 @@ Future<String?> _callStaffFunctionLocal(Map<String, dynamic> body) async {
     final email = '$username@store.local';
     final inserted = await pg.query(
       "INSERT INTO auth.users (email, encrypted_password, raw_user_meta_data) "
-      "VALUES (@email, crypt(@pw, gen_salt('bf')), jsonb_build_object('full_name', @name, 'username', @user)) "
+      "VALUES (@email, crypt(@pw, gen_salt('bf')), jsonb_build_object('full_name', @name::text, 'username', @user::text)) "
       "RETURNING id",
       {'email': email, 'pw': password, 'name': fullName, 'user': username},
     );
