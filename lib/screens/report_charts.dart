@@ -47,13 +47,13 @@ Widget _chartCard(String title, Widget child, {String? note, Widget? action}) =>
       ),
     );
 
-Widget _selected(String? text) => Container(
+Widget _selected(String? text, {String hint = 'Tap a bar for details.'}) => Container(
       width: double.infinity,
       margin: const EdgeInsets.only(top: 10),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
           color: const Color(0xFFF3F5FA), borderRadius: BorderRadius.circular(8)),
-      child: Text(text ?? 'Tap a bar for details.',
+      child: Text(text ?? hint,
           style: TextStyle(
               color: text == null ? Brand.muted : Brand.navy,
               fontSize: 13,
@@ -66,6 +66,35 @@ String _short(double v) {
   if (a >= 1000) return '${(v / 1000).toStringAsFixed(a >= 10000 ? 0 : 1)}k';
   return v.toStringAsFixed(0);
 }
+
+/// Gives a chart enough room for its points: when there are too many to fit, the chart becomes
+/// wider than the card and scrolls sideways (with a scrollbar) so nothing is squashed or cut off.
+/// [build] gets the width each point has and how many labels to skip so they never overlap.
+Widget _fitChart(List<ChartPoint> pts, double minPerPoint, Widget Function(int labelStep) build) =>
+    LayoutBuilder(builder: (context, box) {
+      final avail = box.maxWidth.isFinite ? box.maxWidth : 600.0;
+      final need = 60 + pts.length * minPerPoint;
+      final width = need > avail ? need : avail;
+      final per = (width - 60) / pts.length;
+      final longest = pts.fold<int>(0, (m, p) => p.label.length > m ? p.label.length : m);
+      final labelW = longest * 6.2 + 14;
+      final step = (labelW / per).ceil().clamp(1, pts.length);
+      final chart = SizedBox(width: width, height: 220, child: build(step));
+      if (width <= avail + 0.5) return chart;
+      final ctl = ScrollController();
+      return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Scrollbar(
+          controller: ctl,
+          thumbVisibility: true,
+          child: SingleChildScrollView(
+              controller: ctl,
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.only(bottom: 12),
+              child: chart),
+        ),
+        const Text('Drag sideways to see the rest.', style: TextStyle(color: Brand.muted, fontSize: 11)),
+      ]);
+    });
 
 /// Vertical bars. Hover or tap for the value, tap to pin the details underneath.
 class BarCard extends StatefulWidget {
@@ -98,14 +127,16 @@ class _BarCardState extends State<BarCard> {
           note: widget.note);
     }
     final maxV = pts.map((p) => p.value).reduce((a, b) => a > b ? a : b);
-    final step = pts.length > 14 ? (pts.length / 7).ceil() : 1;
+    final minV = pts.map((p) => p.value).reduce((a, b) => a < b ? a : b);
     final sel = _sel != null && _sel! < pts.length ? pts[_sel!] : null;
     return _chartCard(
       widget.title,
       Column(children: [
-        SizedBox(
-          height: 220,
-          child: BarChart(BarChartData(
+        _fitChart(
+          pts,
+          26,
+          (step) => BarChart(BarChartData(
+            minY: minV < 0 ? minV * 1.15 : 0,
             maxY: maxV <= 0 ? 1 : maxV * 1.15,
             gridData: FlGridData(
                 drawVerticalLine: false,
@@ -152,7 +183,7 @@ class _BarCardState extends State<BarCard> {
                 BarChartGroupData(x: i, barRods: [
                   BarChartRodData(
                     toY: pts[i].value,
-                    width: pts.length > 20 ? 8 : 18,
+                    width: pts.length > 20 ? 12 : 18,
                     color: _sel == i ? Brand.gold : widget.color,
                     borderRadius: const BorderRadius.vertical(top: Radius.circular(5)),
                   )
@@ -201,16 +232,18 @@ class _LineCardState extends State<LineCard> {
           note: widget.note);
     }
     final maxV = pts.map((p) => p.value).reduce((a, b) => a > b ? a : b);
-    final step = pts.length > 10 ? (pts.length / 6).ceil() : 1;
+    final minV = pts.map((p) => p.value).reduce((a, b) => a < b ? a : b);
     final sel = _sel != null && _sel! < pts.length ? pts[_sel!] : null;
     return _chartCard(
       widget.title,
       Column(children: [
-        SizedBox(
-          height: 220,
-          child: LineChart(LineChartData(
-            minY: 0,
+        _fitChart(
+          pts,
+          34,
+          (step) => LineChart(LineChartData(
+            minY: minV < 0 ? minV * 1.15 : 0, // amounts below zero (in credit) are drawn, not cut off
             maxY: maxV <= 0 ? 1 : maxV * 1.15,
+            clipData: const FlClipData.all(),
             gridData: FlGridData(
                 drawVerticalLine: false,
                 getDrawingHorizontalLine: (_) => const FlLine(color: Color(0xFFE3E8F2), strokeWidth: 1)),
@@ -261,6 +294,7 @@ class _LineCardState extends State<LineCard> {
                 spots: [for (var i = 0; i < pts.length; i++) FlSpot(i.toDouble(), pts[i].value)],
                 isCurved: true,
                 curveSmoothness: 0.2,
+                preventCurveOverShooting: true, // the line never dips below or above the real values
                 color: Brand.navy,
                 barWidth: 3,
                 dotData: FlDotData(
@@ -275,9 +309,11 @@ class _LineCardState extends State<LineCard> {
             ],
           )),
         ),
-        _selected(sel == null
-            ? null
-            : '${sel.label}: ${widget.format(sel.value)}${sel.detail.isEmpty ? '' : ' · ${sel.detail}'}'),
+        _selected(
+            sel == null
+                ? null
+                : '${sel.label}: ${widget.format(sel.value)}${sel.detail.isEmpty ? '' : ' · ${sel.detail}'}',
+            hint: 'Tap a point for details.'),
       ]),
       note: widget.note,
     );
