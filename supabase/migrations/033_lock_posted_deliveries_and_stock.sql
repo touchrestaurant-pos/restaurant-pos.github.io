@@ -56,11 +56,7 @@ begin
     return new;
   end if;
   if new.qty_on_hand is distinct from old.qty_on_hand or new.avg_cost is distinct from old.avg_cost then
-    insert into public.audit_log(table_name, row_id, action, changes)
-      values ('stock_items', new.id::text, 'blocked_change', jsonb_build_object('what', 'stock level or cost edited directly',
-        'item', old.name, 'qty', jsonb_build_array(old.qty_on_hand, new.qty_on_hand), 'cost', jsonb_build_array(old.avg_cost, new.avg_cost)));
-    new.qty_on_hand := old.qty_on_hand;
-    new.avg_cost := old.avg_cost;
+    raise exception 'Stock on hand and average cost change only through deliveries, sales, stock-takes and adjustments.';
   end if;
   return new;
 end $$;
