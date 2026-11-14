@@ -365,6 +365,7 @@ class _LevelsTabState extends State<_LevelsTab> {
         int count(String c) => _items().where((i) => '${i['category'] ?? ''}'.trim() == c).length;
         Future<void> run(Future<void> Function() f) async {
           if (await _online(ctx, f)) {
+            SyncService.instance.refreshAll(); // categories are not in the quick refresh, so pull everything now
             await SyncService.instance.syncNow();
             set(() {});
           }
