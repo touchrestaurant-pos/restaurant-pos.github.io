@@ -12,6 +12,7 @@ import '../data/sync_service.dart';
 import '../receipt/download_file.dart';
 import '../theme.dart';
 import 'stock_screen.dart';
+import '../data/app_db.dart';
 
 SupabaseClient get _db => Supabase.instance.client;
 
@@ -102,7 +103,7 @@ class _PurchaseOrdersTabState extends State<PurchaseOrdersTab> {
   Future<void> _fromBuyingList() async {
     try {
       final now = DateTime.now();
-      final report = await _db.rpc('admin_report', params: {
+      final report = await AppDb.rpc('admin_report', params: {
         'p_from': now.subtract(const Duration(days: 1)).toUtc().toIso8601String(),
         'p_to': now.toUtc().toIso8601String(),
       });
@@ -413,7 +414,7 @@ class _PoEditorState extends State<_PoEditor> {
     if (id == null) return;
     setState(() => _busy = true);
     try {
-      final grvId = await _db.rpc('po_to_grv', params: {'p_po': id});
+      final grvId = await AppDb.rpc('po_to_grv', params: {'p_po': id});
       await SyncService.instance.syncNow();
       if (!mounted) return;
       final grv = LocalStore.row('grvs', grvId);

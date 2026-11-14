@@ -33,9 +33,13 @@ class PgClient {
   bool get isOpen => !_closed;
 
   /// Sets the current user id for auth.uid() in SQL functions.
+  /// Uses a session-level SET (not SET LOCAL) so the value survives across
+  /// separate statements/transactions for the lifetime of this connection —
+  /// SET LOCAL would reset after the very next implicit transaction and
+  /// silently break every auth.uid()-dependent function and policy.
   Future<void> setCurrentUser(String? userId) async {
     if (userId != null) {
-      await _conn.execute("SET LOCAL app.current_user_id = '$userId'");
+      await _conn.execute("SET app.current_user_id = '$userId'");
     } else {
       await _conn.execute("RESET app.current_user_id");
     }
@@ -94,11 +98,21 @@ class PgClient {
     if (v is double || v is int || v is bool || v is String) return v;
     if (v is List) return v.map(_dartValue).toList();
     if (v is UndecodedBytes) {
+      String s;
       try {
-        return utf8.decode(v.bytes);
+        s = utf8.decode(v.bytes);
       } catch (_) {
         return v.bytes.toString();
       }
+      // jsonb/json columns (and RPC results) arrive as undecoded text;
+      // parse them back into a Map/List so callers get real objects.
+      final trimmed = s.trimLeft();
+      if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+        try {
+          return json.decode(s);
+        } catch (_) {/* not actually JSON, fall through */}
+      }
+      return s;
     }
     if (v is Map) return v;
     return '$v';

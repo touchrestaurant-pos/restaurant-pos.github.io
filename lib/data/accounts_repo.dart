@@ -2,6 +2,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'local_store.dart';
 import 'repo.dart';
+import 'app_db.dart';
 
 /// Customer accounts ("sale on account"). The balance and the rules live on the
 /// server; this only calls it. An account sale needs the internet, because the
@@ -17,17 +18,17 @@ class AccountsRepo {
 
   /// Accounts the till may use, freshly read. Cashiers only get the ones the admin made visible.
   static Future<List<Map<String, dynamic>>> tillAccounts() async {
-    final res = _list(await _db.rpc('till_accounts'));
+    final res = _list(await AppDb.rpc('till_accounts'));
     await LocalStore.setMeta('till_accounts', res);
     return res;
   }
 
-  static Future<List<Map<String, dynamic>>> ageing() async => _list(await _db.rpc('account_ageing'));
+  static Future<List<Map<String, dynamic>>> ageing() async => _list(await AppDb.rpc('account_ageing'));
 
-  static Future<String> save(Map<String, dynamic> a) async => '${await _db.rpc('save_account', params: {'p': a})}';
+  static Future<String> save(Map<String, dynamic> a) async => '${await AppDb.rpc('save_account', params: {'p': a})}';
 
   static Future<void> setStatus(String id, String status, String reason) =>
-      _db.rpc('set_account_status', params: {'p_id': id, 'p_status': status, 'p_reason': reason});
+      AppDb.rpc('set_account_status', params: {'p_id': id, 'p_status': status, 'p_reason': reason});
 
   static Future<Map<String, dynamic>> recordPayment({
     required String account,
@@ -37,7 +38,7 @@ class AccountsRepo {
     String? note,
     required String id,
   }) async =>
-      Map<String, dynamic>.from(await _db.rpc('record_account_payment', params: {
+      Map<String, dynamic>.from(await AppDb.rpc('record_account_payment', params: {
         'p_account': account,
         'p_amount': amount,
         'p_method': method,
@@ -54,7 +55,7 @@ class AccountsRepo {
     String? reference,
     required String id,
   }) async =>
-      Map<String, dynamic>.from(await _db.rpc('refund_account_credit', params: {
+      Map<String, dynamic>.from(await AppDb.rpc('refund_account_credit', params: {
         'p_account': account,
         'p_amount': amount,
         'p_method': method,
@@ -63,15 +64,15 @@ class AccountsRepo {
       }) as Map);
 
   static Future<void> writeOff(String account, double amount, String reason) =>
-      _db.rpc('account_writeoff', params: {'p_account': account, 'p_amount': amount, 'p_reason': reason});
+      AppDb.rpc('account_writeoff', params: {'p_account': account, 'p_amount': amount, 'p_reason': reason});
 
   static Future<void> reinstate(String account, double amount, String reason) =>
-      _db.rpc('account_reinstate', params: {'p_account': account, 'p_amount': amount, 'p_reason': reason});
+      AppDb.rpc('account_reinstate', params: {'p_account': account, 'p_amount': amount, 'p_reason': reason});
 
   static Future<Map<String, dynamic>> statement(String account, DateTime from, DateTime to) async {
     String d(DateTime x) => '${x.year}-${x.month.toString().padLeft(2, '0')}-${x.day.toString().padLeft(2, '0')}';
     return Map<String, dynamic>.from(
-        await _db.rpc('account_statement', params: {'p_account': account, 'p_from': d(from), 'p_to': d(to)}) as Map);
+        await AppDb.rpc('account_statement', params: {'p_account': account, 'p_from': d(from), 'p_to': d(to)}) as Map);
   }
 
   /// Turns a server error into a sentence a person can act on.

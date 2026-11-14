@@ -8,6 +8,7 @@ import '../data/repo.dart';
 import '../receipt/download_file.dart';
 import '../theme.dart';
 import 'report_charts.dart';
+import '../data/app_db.dart';
 
 /// Loads the server's disbursement_report for a range of days (both ends included).
 class _Loader extends StatefulWidget {
@@ -46,8 +47,7 @@ class _LoaderState extends State<_Loader> {
     try {
       // The reports screen's range ends the day after the last day, so step back one day.
       final last = widget.range.end.subtract(const Duration(days: 1));
-      final r = await Supabase.instance.client
-          .rpc('disbursement_report', params: {'p_from': _day(widget.range.start), 'p_to': _day(last.isBefore(widget.range.start) ? widget.range.start : last)});
+      final r = await AppDb.rpc('disbursement_report', params: {'p_from': _day(widget.range.start), 'p_to': _day(last.isBefore(widget.range.start) ? widget.range.start : last)});
       _d = Map<String, dynamic>.from(r as Map);
     } on PostgrestException catch (e) {
       _error = e.message;

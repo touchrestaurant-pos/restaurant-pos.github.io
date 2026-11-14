@@ -7,6 +7,7 @@ import '../data/repo.dart';
 import '../data/supplier_ledger.dart';
 import '../receipt/ledger.dart';
 import '../theme.dart';
+import '../data/app_db.dart';
 
 SupabaseClient get _db => Supabase.instance.client;
 
@@ -127,7 +128,7 @@ class _ProfitTabState extends State<_ProfitTab> {
       _error = null;
     });
     try {
-      final res = await _db.rpc('profit_report', params: {'p_from': _d(_from), 'p_to': _d(_to)});
+      final res = await AppDb.rpc('profit_report', params: {'p_from': _d(_from), 'p_to': _d(_to)});
       _r = Map<String, dynamic>.from(res as Map);
     } on PostgrestException catch (e) {
       _error = e.message;
@@ -449,7 +450,7 @@ class _SuppliersTabState extends State<_SuppliersTab> {
   Future<void> _load() async {
     setState(() => _loading = true);
     await _guard(context, () async {
-      _data = Map<String, dynamic>.from(await _db.rpc('supplier_accounts') as Map);
+      _data = Map<String, dynamic>.from(await AppDb.rpc('supplier_accounts') as Map);
     });
     if (mounted) setState(() => _loading = false);
   }

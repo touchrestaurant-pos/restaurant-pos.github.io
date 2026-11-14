@@ -4,6 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../data/local_store.dart';
 import '../data/repo.dart';
 import '../theme.dart';
+import '../data/app_db.dart';
 
 /// What the money is for. The text is stored with each pay-out and used in the reports.
 const tillCategories = [
@@ -59,7 +60,7 @@ class _TillScreenState extends State<TillScreen> {
       _error = null;
     });
     try {
-      final r = await Supabase.instance.client.rpc('my_payouts');
+      final r = await AppDb.rpc('my_payouts');
       _data = Map<String, dynamic>.from(r as Map);
     } catch (e) {
       _error = _msg(e);
@@ -113,7 +114,7 @@ class _TillScreenState extends State<TillScreen> {
       _formError = null;
     });
     try {
-      await Supabase.instance.client.rpc('till_payout', params: {
+      await AppDb.rpc('till_payout', params: {
         'p_amount': v,
         'p_category': _category,
         'p_reference': _reference.text.trim(),

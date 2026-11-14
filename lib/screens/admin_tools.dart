@@ -12,6 +12,7 @@ import '../data/sync_service.dart';
 import '../receipt/download_file.dart';
 import '../receipt/receipt_service.dart';
 import '../theme.dart';
+import '../data/app_db.dart';
 
 SupabaseClient get _db => Supabase.instance.client;
 
@@ -108,7 +109,7 @@ class _AdminToolsState extends State<AdminTools> {
     if (ok != true) return;
     setState(() => _busy = true);
     try {
-      await _db.rpc('go_live');
+      await AppDb.rpc('go_live');
       await SyncService.instance.syncNow();
       _say('You are live. Clearing sales is now switched off.');
     } on PostgrestException catch (e) {
@@ -155,7 +156,7 @@ class _AdminToolsState extends State<AdminTools> {
     if (ok != true) return;
     setState(() => _busy = true);
     try {
-      final res = await _db.rpc('clear_test_sales', params: {'p_confirm': 'DELETE'});
+      final res = await AppDb.rpc('clear_test_sales', params: {'p_confirm': 'DELETE'});
       // Drop this device's copies and anything still waiting to be sent for sales.
       for (final t in ['orders', 'order_items', 'payments']) {
         await LocalStore.setRows(t, []);

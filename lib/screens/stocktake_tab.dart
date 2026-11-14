@@ -5,6 +5,7 @@ import '../data/local_store.dart';
 import '../data/repo.dart';
 import '../data/sync_service.dart';
 import '../theme.dart';
+import '../data/app_db.dart';
 
 SupabaseClient get _db => Supabase.instance.client;
 
@@ -47,7 +48,7 @@ class _StocktakeTabState extends State<StocktakeTab> {
 
   Future<void> _start() async {
     try {
-      final id = await _db.rpc('start_stocktake', params: {'p_note': null});
+      final id = await AppDb.rpc('start_stocktake', params: {'p_note': null});
       await _load();
       final t = _list.firstWhere((e) => e['id'] == id, orElse: () => {'id': id, 'status': 'draft'});
       if (mounted) _open(t);
@@ -192,7 +193,7 @@ class _StocktakeEditorState extends State<_StocktakeEditor> {
       for (final l in _lines) {
         await _saveLine(l);
       }
-      await _db.rpc('post_stocktake', params: {'p_id': widget.take['id']});
+      await AppDb.rpc('post_stocktake', params: {'p_id': widget.take['id']});
       await SyncService.instance.syncNow();
       _posted = true;
       await _load();

@@ -9,6 +9,7 @@ import '../data/sync_service.dart';
 import '../receipt/receipt_service.dart';
 import '../theme.dart';
 import '../widgets/payment_dialog.dart';
+import '../data/app_db.dart';
 
 bool get _isManager => const ['admin', 'supervisor'].contains(AuthService.instance.role);
 
@@ -855,7 +856,7 @@ class _DiscountDialogState extends State<_DiscountDialog> {
       _pinError = null;
     });
     try {
-      final r = await Supabase.instance.client.rpc('approve_discount', params: {
+      final r = await AppDb.rpc('approve_discount', params: {
         'p_pin': _pin.text.trim(),
         'p_amount': _amount,
         'p_detail': '${_pct.toStringAsFixed(1)}% - ${_reason.text.trim()}',
@@ -1402,7 +1403,7 @@ class _CancelDialogState extends State<_CancelDialog> {
       byMethod.removeWhere((_, v) => v < 0.005);
       final toCustomer = round2(byMethod.values.fold<double>(0, (s, v) => s + v));
       // One id per refund line, so pressing the button again after a bad connection cannot pay it back twice.
-      Future<void> refund(double amount, String method) => db.rpc('issue_refund', params: {
+      Future<void> refund(double amount, String method) => AppDb.rpc('issue_refund', params: {
             'p_order_id': id,
             'p_amount': amount,
             'p_method': method,

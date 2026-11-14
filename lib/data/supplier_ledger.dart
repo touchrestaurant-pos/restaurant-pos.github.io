@@ -6,6 +6,7 @@ import '../widgets/ledger_statement.dart';
 import 'accounts_repo.dart';
 import 'local_store.dart';
 import 'repo.dart';
+import 'app_db.dart';
 
 String _d(DateTime x) => '${x.year}-${x.month.toString().padLeft(2, '0')}-${x.day.toString().padLeft(2, '0')}';
 
@@ -188,7 +189,7 @@ Future<bool> recordSupplierPayment(BuildContext context,
     if (ok != true || !context.mounted) return false;
     var saved = false;
     try {
-      await Supabase.instance.client.rpc('record_supplier_payment', params: {
+      await AppDb.rpc('record_supplier_payment', params: {
         'p_id': payId,
         'p_supplier': supplierId,
         'p_grv': delivery?['id'],

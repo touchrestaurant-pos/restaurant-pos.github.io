@@ -12,6 +12,7 @@ import '../receipt/download_file.dart';
 import 'package:printing/printing.dart';
 import 'till_screen.dart' show tillCategories;
 import '../theme.dart';
+import '../data/app_db.dart';
 
 SupabaseClient get _db => Supabase.instance.client;
 
@@ -61,7 +62,7 @@ class _CashUpScreenState extends State<CashUpScreen> {
       _error = null;
     });
     try {
-      final res = await _db.rpc('cash_up_summary', params: {'p_date': _d(_day), 'p_staff': _staff});
+      final res = await AppDb.rpc('cash_up_summary', params: {'p_date': _d(_day), 'p_staff': _staff});
       _sum = Map<String, dynamic>.from(res as Map);
       final hist = await _db
           .from('cash_ups')
@@ -94,7 +95,7 @@ class _CashUpScreenState extends State<CashUpScreen> {
     if (go != true) return;
     setState(() => _saving = true);
     try {
-      await _db.rpc('save_cash_up', params: {
+      await AppDb.rpc('save_cash_up', params: {
         'p_date': _d(_day),
         'p_float': _num(_float),
         'p_counted': _num(_counted),
@@ -121,7 +122,7 @@ class _CashUpScreenState extends State<CashUpScreen> {
   /// The whole day on one page: sales, VAT, payments, money out of the tills, cash-up counts.
   Future<void> _summaryReport() async {
     try {
-      final r = Map<String, dynamic>.from(await _db.rpc('daily_summary', params: {'p_date': _d(_day)}) as Map);
+      final r = Map<String, dynamic>.from(await AppDb.rpc('daily_summary', params: {'p_date': _d(_day)}) as Map);
       final bytes = await dailySummaryPdf(r, company: '${companyRow()?['trading_name'] ?? ''}'.isEmpty ? '${companyRow()?['company_name'] ?? ''}' : '${companyRow()?['trading_name']}');
       await Printing.layoutPdf(name: 'Daily-summary-${_d(_day)}', onLayout: (_) async => bytes);
     } on PostgrestException catch (e) {
@@ -245,7 +246,7 @@ class _CashUpScreenState extends State<CashUpScreen> {
     );
     if (go != true) return;
     try {
-      await _db.rpc('close_day', params: {'p_date': _d(_day)});
+      await AppDb.rpc('close_day', params: {'p_date': _d(_day)});
       await _load();
       await _showClose();
     } on PostgrestException catch (e) {
@@ -257,7 +258,7 @@ class _CashUpScreenState extends State<CashUpScreen> {
 
   Future<void> _reopen() async {
     try {
-      await _db.rpc('reopen_day', params: {'p_date': _d(_day)});
+      await AppDb.rpc('reopen_day', params: {'p_date': _d(_day)});
       await _load();
     } on PostgrestException catch (e) {
       _say(e.message);

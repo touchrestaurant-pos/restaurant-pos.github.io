@@ -12,6 +12,7 @@ import '../auth/auth_service.dart';
 import 'purchase_orders.dart';
 import 'stock_item_view.dart';
 import 'stocktake_tab.dart';
+import '../data/app_db.dart';
 
 SupabaseClient get _db => Supabase.instance.client;
 
@@ -340,7 +341,7 @@ class _LevelsTabState extends State<_LevelsTab> {
     if (go != true || !context.mounted) return;
     String? result;
     final ok = await _online(context, () async {
-      result = '${await _db.rpc('delete_stock_item', params: {'p_id': item['id']})}';
+      result = '${await AppDb.rpc('delete_stock_item', params: {'p_id': item['id']})}';
     });
     if (ok && context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -419,7 +420,7 @@ class _LevelsTabState extends State<_LevelsTab> {
             ),
           );
           if (go != true) return;
-          await run(() => _db.rpc('delete_stock_category', params: {'p_name': name, 'p_move_to': moveTo}));
+          await run(() => AppDb.rpc('delete_stock_category', params: {'p_name': name, 'p_move_to': moveTo}));
         }
 
         return AlertDialog(
@@ -452,7 +453,7 @@ class _LevelsTabState extends State<_LevelsTab> {
                             onPressed: () async {
                               final v = await ask('Rename "$c"', c);
                               if (v == null || v.isEmpty || v == c) return;
-                              await run(() => _db.rpc('rename_stock_category', params: {'p_old': c, 'p_new': v}));
+                              await run(() => AppDb.rpc('rename_stock_category', params: {'p_old': c, 'p_new': v}));
                               if (_category == c) _category = v;
                             },
                             child: const Text('Rename')),
@@ -985,7 +986,7 @@ class GrvEditorState extends State<GrvEditor> {
     setState(() => _busy = true);
     final ok = await _online(context, () async {
       final id = await _saveDraft();
-      if (post) await _db.rpc('post_grv', params: {'p_grv_id': id});
+      if (post) await AppDb.rpc('post_grv', params: {'p_grv_id': id});
     });
     if (!mounted) return;
     setState(() => _busy = false);
@@ -1024,7 +1025,7 @@ class GrvEditorState extends State<GrvEditor> {
     );
     if (reason == null || !mounted) return;
     final ok = await _online(context, () async {
-      await _db.rpc('reverse_grv', params: {'p_grv_id': widget.grv!['id'], 'p_reason': reason});
+      await AppDb.rpc('reverse_grv', params: {'p_grv_id': widget.grv!['id'], 'p_reason': reason});
     });
     if (ok && mounted) Navigator.pop(context);
   }
@@ -1292,7 +1293,7 @@ class _SuppliersTabState extends State<_SuppliersTab> {
       _note = null;
     });
     try {
-      final d = Map<String, dynamic>.from(await _db.rpc('supplier_accounts') as Map);
+      final d = Map<String, dynamic>.from(await AppDb.rpc('supplier_accounts') as Map);
       _bal = {
         for (final x in (d['suppliers'] as List? ?? const []))
           '${(x as Map)['id']}': Map<String, dynamic>.from(x),

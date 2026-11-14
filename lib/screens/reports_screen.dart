@@ -12,6 +12,7 @@ import '../widgets/brand_mark.dart' show companyDisplayName;
 import '../auth/auth_service.dart';
 import 'report_charts.dart';
 import 'till_reports.dart';
+import '../data/app_db.dart';
 
 /// Admin reports. All figures are calculated on the server for the chosen dates,
 /// so they are exact and do not depend on what is stored on this device.
@@ -127,7 +128,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
     });
     final range = _range();
     try {
-      final res = await Supabase.instance.client.rpc('admin_report', params: {
+      final res = await AppDb.rpc('admin_report', params: {
         'p_from': range.start.toUtc().toIso8601String(),
         'p_to': range.end.toUtc().toIso8601String(),
       });
@@ -135,7 +136,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
       _loaded = range;
       _cachedAt = null;
       try {
-        final v = await Supabase.instance.client.rpc('vat_report', params: {
+        final v = await AppDb.rpc('vat_report', params: {
           'p_from': range.start.toUtc().toIso8601String(),
           'p_to': range.end.toUtc().toIso8601String(),
         });
@@ -145,7 +146,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
         _vat = [];
       }
       try {
-        final rf = await Supabase.instance.client.rpc('admin_refunds', params: {
+        final rf = await AppDb.rpc('admin_refunds', params: {
           'p_from': range.start.toUtc().toIso8601String(),
           'p_to': range.end.toUtc().toIso8601String(),
         });
@@ -155,7 +156,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
       }
       try {
         final len = range.end.difference(range.start);
-        final prev = await Supabase.instance.client.rpc('admin_report', params: {
+        final prev = await AppDb.rpc('admin_report', params: {
           'p_from': range.start.subtract(len).toUtc().toIso8601String(),
           'p_to': range.start.toUtc().toIso8601String(),
         });
