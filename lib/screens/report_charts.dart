@@ -149,8 +149,10 @@ class _BarCardState extends State<BarCard> {
                   sideTitles: SideTitles(
                       showTitles: true,
                       reservedSize: 44,
-                      getTitlesWidget: (v, meta) => Text(_short(v),
-                          style: const TextStyle(fontSize: 11, color: Brand.muted)))),
+                      // The odd top and bottom edge values are left out so they never crowd the round ones.
+                      getTitlesWidget: (v, meta) => (v == meta.max || v == meta.min) && v != 0
+                          ? const SizedBox()
+                          : Text(_short(v), style: const TextStyle(fontSize: 11, color: Brand.muted)))),
               bottomTitles: AxisTitles(
                   sideTitles: SideTitles(
                       showTitles: true,
@@ -255,8 +257,10 @@ class _LineCardState extends State<LineCard> {
                   sideTitles: SideTitles(
                       showTitles: true,
                       reservedSize: 44,
-                      getTitlesWidget: (v, meta) => Text(_short(v),
-                          style: const TextStyle(fontSize: 11, color: Brand.muted)))),
+                      // The odd top and bottom edge values are left out so they never crowd the round ones.
+                      getTitlesWidget: (v, meta) => (v == meta.max || v == meta.min) && v != 0
+                          ? const SizedBox()
+                          : Text(_short(v), style: const TextStyle(fontSize: 11, color: Brand.muted)))),
               bottomTitles: AxisTitles(
                   sideTitles: SideTitles(
                       showTitles: true,
