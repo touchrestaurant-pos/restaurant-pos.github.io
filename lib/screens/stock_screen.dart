@@ -360,7 +360,9 @@ class _LevelsTabState extends State<_LevelsTab> {
   Future<void> _manageCategories(BuildContext context) async {
     await showDialog<void>(
       context: context,
-      builder: (ctx) => StatefulBuilder(builder: (ctx, set) {
+      builder: (ctx) => ListenableBuilder(
+        listenable: SyncService.instance, // redraw when the fresh list arrives from the server
+        builder: (ctx, _) => StatefulBuilder(builder: (ctx, set) {
         final names = _categoryNames()..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
         int count(String c) => _items().where((i) => '${i['category'] ?? ''}'.trim() == c).length;
         Future<void> run(Future<void> Function() f) async {
@@ -469,7 +471,7 @@ class _LevelsTabState extends State<_LevelsTab> {
           ),
           actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Done'))],
         );
-      }),
+      })),
     );
     if (mounted) setState(() {});
   }
