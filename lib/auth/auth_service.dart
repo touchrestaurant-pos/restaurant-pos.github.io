@@ -109,7 +109,7 @@ class AuthService extends ChangeNotifier {
 
     final email = typed.contains('@')
         ? typed
-        : '${typed.toLowerCase()}@${AppConfig.staffLoginDomain}';
+        : '${typed.toLowerCase()}@store.local';
 
     try {
       // Look up the user in auth.users (created by local_create_admin.sql or the admin screen).
