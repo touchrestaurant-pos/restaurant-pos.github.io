@@ -565,6 +565,22 @@ class _SuppliersTabState extends State<_SuppliersTab> {
                         tooltip: 'Delete payment',
                         icon: const Icon(Icons.delete_outline, size: 18),
                         onPressed: () async {
+                          final go = await showDialog<bool>(
+                            context: context,
+                            builder: (ctx) => AlertDialog(
+                              title: const Text('Delete this payment?'),
+                              content: Text('${supName(p['supplier_id'])} · ${money(n(p['amount']))} · ${p['paid_on']}\n\n'
+                                  'The supplier balance goes back up by this amount. The deletion is kept in the change history.'),
+                              actions: [
+                                TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Keep')),
+                                FilledButton(
+                                    style: FilledButton.styleFrom(backgroundColor: Brand.red, foregroundColor: Colors.white),
+                                    onPressed: () => Navigator.pop(ctx, true),
+                                    child: const Text('Delete')),
+                              ],
+                            ),
+                          );
+                          if (go != true || !context.mounted) return;
                           await _guard(context, () => _db.from('supplier_payments').delete().eq('id', p['id']));
                           _load();
                         }),

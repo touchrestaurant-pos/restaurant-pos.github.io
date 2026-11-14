@@ -486,10 +486,24 @@ class _CashierScreenState extends State<CashierScreen> {
                 ),
                 if (_type == 'eat_in') ...[
                   const SizedBox(height: 8),
+                  // A gentle reminder, not a block: the order can still be sent without a table.
                   TextField(
                     controller: _table,
                     keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(labelText: 'Table number', isDense: true),
+                    onChanged: (_) => refresh(),
+                    decoration: _table.text.trim().isEmpty
+                        ? InputDecoration(
+                            labelText: 'Table number',
+                            isDense: true,
+                            labelStyle: const TextStyle(color: Brand.red),
+                            helperText: 'Eat in: remember to choose the table number',
+                            helperStyle: const TextStyle(color: Brand.red),
+                            enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: Brand.red, width: 1.5)),
+                            focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: Brand.red, width: 2)),
+                          )
+                        : const InputDecoration(labelText: 'Table number', isDense: true),
                   ),
                 ],
                 if (_type != 'eat_in') ...[
