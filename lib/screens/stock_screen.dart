@@ -634,7 +634,7 @@ class _LevelsTabState extends State<_LevelsTab> {
                 ],
                 const SizedBox(height: 8),
                 DropdownButtonFormField<String>(
-                  initialValue: vatType,
+                  value: vatType,
                   decoration: const InputDecoration(
                       labelText: 'VAT when you buy it',
                       helperText: 'Fresh vegetables and fruit, milk, eggs, rice, flour and cooking oil are zero-rated'),
@@ -647,7 +647,7 @@ class _LevelsTabState extends State<_LevelsTab> {
                 ),
                 const SizedBox(height: 8),
                 DropdownButtonFormField<String?>(
-                  initialValue: supplier,
+                  value: supplier,
                   decoration: const InputDecoration(labelText: 'Usual supplier'),
                   items: [
                     const DropdownMenuItem(value: null, child: Text('None')),
@@ -1077,7 +1077,7 @@ class GrvEditorState extends State<GrvEditor> {
           SizedBox(
             width: 280,
             child: DropdownButtonFormField<String>(
-              initialValue: _supplier,
+              value: _supplier,
               decoration: const InputDecoration(labelText: 'Supplier'),
               items: [for (final s in _suppliers()) DropdownMenuItem(value: s['id'] as String, child: Text('${s['name']}'))],
               onChanged: _posted ? null : (v) => setState(() => _supplier = v),

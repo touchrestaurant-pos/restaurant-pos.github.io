@@ -280,7 +280,7 @@ class _AddStaffDialogState extends State<_AddStaffDialog> {
                       labelText: 'Password (at least 6 characters)')),
               const SizedBox(height: 12),
               DropdownButtonFormField<String>(
-                initialValue: _role,
+                value: _role,
                 decoration: const InputDecoration(labelText: 'Role'),
                 items: [
                   for (final e in roleLabels.entries)

@@ -453,7 +453,7 @@ class _PoEditorState extends State<_PoEditor> {
           SizedBox(
             width: 300,
             child: DropdownButtonFormField<String>(
-              initialValue: _supplier,
+              value: _supplier,
               decoration: const InputDecoration(labelText: 'Supplier'),
               items: [for (final s in suppliers) DropdownMenuItem(value: s['id'] as String, child: Text('${s['name']}'))],
               onChanged: _locked ? null : (v) => setState(() => _supplier = v),

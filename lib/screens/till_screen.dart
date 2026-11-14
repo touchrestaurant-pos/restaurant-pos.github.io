@@ -164,7 +164,7 @@ class _TillScreenState extends State<TillScreen> {
             padding: const EdgeInsets.all(16),
             child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
               DropdownButtonFormField<String>(
-                initialValue: _category,
+                value: _category,
                 decoration: const InputDecoration(labelText: 'What is the money for?'),
                 items: [for (final c in tillCategories) DropdownMenuItem(value: c, child: Text(c))],
                 onChanged: (v) => setState(() => _category = v ?? _category),

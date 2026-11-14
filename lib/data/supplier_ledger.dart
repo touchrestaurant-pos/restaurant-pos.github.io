@@ -141,7 +141,7 @@ Future<bool> recordSupplierPayment(BuildContext context,
                   decoration: const InputDecoration(labelText: 'Amount', prefixText: 'R ')),
               const SizedBox(height: 8),
               DropdownButtonFormField<String>(
-                initialValue: method,
+                value: method,
                 decoration: const InputDecoration(labelText: 'How'),
                 items: const [
                   DropdownMenuItem(value: 'eft', child: Text('EFT')),

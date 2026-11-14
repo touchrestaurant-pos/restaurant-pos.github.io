@@ -49,7 +49,7 @@ class PgClient {
       result = await _conn.execute(sql);
     }
     if (result.schema.columns.isEmpty) return [];
-    final columns = result.schema.columns.map((c) => c.columnName).toList();
+    final columns = result.schema.columns.map((c) => c.columnName ?? '').toList();
     return result.map((row) {
       final map = <String, dynamic>{};
       for (var i = 0; i < columns.length; i++) {

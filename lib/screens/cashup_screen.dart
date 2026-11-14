@@ -156,7 +156,7 @@ class _CashUpScreenState extends State<CashUpScreen> {
             width: 400,
             child: Column(mainAxisSize: MainAxisSize.min, children: [
               DropdownButtonFormField<String>(
-                initialValue: kind,
+                value: kind,
                 decoration: const InputDecoration(labelText: 'What happened'),
                 items: [for (final e in _kinds.entries) DropdownMenuItem(value: e.key, child: Text(e.value))],
                 onChanged: (v) => set(() {
@@ -168,7 +168,7 @@ class _CashUpScreenState extends State<CashUpScreen> {
                 Padding(
                   padding: const EdgeInsets.only(top: 8),
                   child: DropdownButtonFormField<String>(
-                    initialValue: tillCategories.contains(category) ? category : 'Petty cash',
+                    value: tillCategories.contains(category) ? category : 'Petty cash',
                     decoration: const InputDecoration(labelText: 'What is the money for?'),
                     items: [for (final c in tillCategories.where((c) => c != 'Cash drop to safe' && c != 'Tips paid out')) DropdownMenuItem(value: c, child: Text(c))],
                     onChanged: (v) => set(() => category = v ?? category),

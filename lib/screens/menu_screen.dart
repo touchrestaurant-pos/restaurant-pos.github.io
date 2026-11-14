@@ -411,7 +411,7 @@ class _MenuScreenState extends State<MenuScreen> {
                 TextField(controller: desc, decoration: const InputDecoration(labelText: 'Description (optional)')),
                 const SizedBox(height: 8),
                 DropdownButtonFormField<String>(
-                  initialValue: cat,
+                  value: cat,
                   decoration: const InputDecoration(labelText: 'Category'),
                   items: [for (final c in cats) DropdownMenuItem(value: c['id'] as String, child: Text('${c['name']}'))],
                   onChanged: (v) => set(() => cat = v),
@@ -424,7 +424,7 @@ class _MenuScreenState extends State<MenuScreen> {
                     decoration: const InputDecoration(labelText: 'Price including VAT', prefixText: 'R')),
                 const SizedBox(height: 8),
                 DropdownButtonFormField<String>(
-                  initialValue: vatType,
+                  value: vatType,
                   decoration: const InputDecoration(labelText: 'VAT'),
                   items: const [
                     DropdownMenuItem(value: 'standard', child: Text('Standard rated (15%)')),

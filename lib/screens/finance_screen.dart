@@ -294,7 +294,7 @@ class _ExpensesTabState extends State<_ExpensesTab> {
             child: SingleChildScrollView(
               child: Column(mainAxisSize: MainAxisSize.min, children: [
                 DropdownButtonFormField<String>(
-                  initialValue: category,
+                  value: category,
                   decoration: const InputDecoration(labelText: 'Category'),
                   items: [for (final c in _expenseCategories) DropdownMenuItem(value: c, child: Text(c))],
                   onChanged: (v) => set(() => category = v ?? 'Other'),
@@ -316,7 +316,7 @@ class _ExpensesTabState extends State<_ExpensesTab> {
                   subtitle: Text(hasVat ? 'VAT ${money(vat)}' : 'Wages, rent from a non-vendor and bank charges usually have none'),
                 ),
                 DropdownButtonFormField<String>(
-                  initialValue: paidFrom,
+                  value: paidFrom,
                   decoration: const InputDecoration(labelText: 'Paid from'),
                   items: const [
                     DropdownMenuItem(value: 'bank', child: Text('Bank (EFT / debit order)')),

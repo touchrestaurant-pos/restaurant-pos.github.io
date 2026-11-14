@@ -256,7 +256,7 @@ class _EditDialogState extends State<_EditDialog> {
             ),
             const SizedBox(height: 16),
             DropdownButtonFormField<String?>(
-              initialValue: _stockId,
+              value: _stockId,
               isExpanded: true,
               decoration: const InputDecoration(labelText: 'Affects stock (optional)'),
               items: [
