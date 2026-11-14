@@ -341,7 +341,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           chip('Company reg. no.', st.showReg, 'show_reg'),
         ]),
         const SizedBox(height: 4),
-        const Text('The VAT number shows whenever "Show our VAT number" below is on, because a tax invoice must carry it.',
+        const Text('On a tax invoice (VAT number showing) the VAT number, address, date and VAT lines always print, whatever is ticked here, because the law requires them.',
             style: TextStyle(color: Brand.muted, fontSize: 12)),
         const SizedBox(height: 12),
         _tagEditor(_headerCtl, 'Message above the business name (optional)', 'For example [b][big]Welcome to our shop',

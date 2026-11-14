@@ -373,13 +373,19 @@ List<RLine> receiptLines(ReceiptData r) {
   final footer = '${c['receipt_footer'] ?? ''}'.trim();
   final st = ReceiptStyle.of(c);
   final servedBy = st.showServedBy ? _servedBy(r) : '';
+  // A tax invoice must carry the seller's address, the date and the VAT, whatever the layout says,
+  // and it only says TAX INVOICE once it has its serial number (given by the server when synced).
+  final showAddress = st.showAddress || taxInvoice;
+  final showDate = st.showDate || taxInvoice;
+  final showVatLines = st.showVatLines || taxInvoice;
+  final heading = taxInvoice && r.invoiceNo != null ? 'TAX INVOICE' : st.receiptTitle;
   final lines = <RLine>[
     if (st.headerText.isNotEmpty) ...[...footerLines(st.headerText), const RLine.gap()],
     RLine.center(r.companyName, size: 13 * st.nameScale, bold: true, align: st.headerAlign),
     for (final k in ['company_name', 'address', 'phone', 'email'])
       if ('${c[k] ?? ''}'.trim().isNotEmpty &&
           !(k == 'company_name' && '${c[k]}'.trim() == r.companyName) &&
-          !(k == 'address' && !st.showAddress) &&
+          !(k == 'address' && !showAddress) &&
           !(k == 'phone' && !st.showPhone) &&
           !(k == 'email' && !st.showEmail))
         RLine.center(k == 'phone' ? 'Tel ${c[k]}' : '${c[k]}'.trim(), size: 8, align: st.headerAlign),
@@ -387,12 +393,12 @@ List<RLine> receiptLines(ReceiptData r) {
       RLine.center('Reg no. ${'${c['reg_number']}'.trim()}', size: 8, align: st.headerAlign),
     if (taxInvoice) RLine.center('VAT no. ${r.vatNumber}', size: 8, align: st.headerAlign),
     const RLine.divider(),
-    RLine.center(taxInvoice ? 'TAX INVOICE' : st.receiptTitle, size: 11, bold: true),
+    RLine.center(heading, size: 11, bold: true),
     if (r.invoiceNo != null)
       RLine.center('No. ${r.invoiceNo}', size: 10, bold: true)
     else if (r.paid)
-      const RLine.center('Invoice number given when synced', size: 7),
-    RLine.center('Order #${r.ref}${st.showDate ? ' · ${_when.format(r.when)}' : ''}', size: 8),
+      const RLine.center('Tax invoice number given when synced. Ask for a reprint if you need it.', size: 7),
+    RLine.center('Order #${r.ref}${showDate ? ' · ${_when.format(r.when)}' : ''}', size: 8),
     if (st.showOrderType && r.typeText.isNotEmpty) RLine.center(r.typeText, size: 8),
     if (servedBy.isNotEmpty) RLine.center('Served by $servedBy', size: 8),
     if (st.showCustomer && '${r.order['customer_name'] ?? ''}'.trim().isNotEmpty)
@@ -419,7 +425,7 @@ List<RLine> receiptLines(ReceiptData r) {
           size: 8),
     ],
     RLine.row(showVat ? 'TOTAL (incl. VAT)' : 'TOTAL', money(r.total), bold: true, size: 12 * st.totalScale),
-    if (showVat && st.showVatLines) ...[
+    if (showVat && showVatLines) ...[
       RLine.row('Excl. VAT', money(r.subtotal), size: 8),
       RLine.row('VAT ${_rate()}%', money(r.vat), size: 8),
       ..._vatSplit(r),
