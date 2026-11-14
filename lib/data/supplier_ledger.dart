@@ -122,6 +122,8 @@ Future<bool> recordSupplierPayment(BuildContext context,
     final note = TextEditingController();
     String method = 'eft';
     DateTime day = DateTime.now();
+    bool advance = false;
+    final payId = LocalStore.newId();   // the same id is resent on a retry, so it is saved once
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => StatefulBuilder(builder: (ctx, set) {
@@ -151,6 +153,16 @@ Future<bool> recordSupplierPayment(BuildContext context,
               ),
               const SizedBox(height: 8),
               TextField(controller: note, decoration: const InputDecoration(labelText: 'Reference / note')),
+              if (delivery == null)
+                CheckboxListTile(
+                  contentPadding: EdgeInsets.zero,
+                  value: advance,
+                  onChanged: (v) => set(() => advance = v ?? false),
+                  title: const Text('Paying in advance'),
+                  subtitle: Text(owing == null
+                      ? 'Tick only if you are paying before the goods arrive.'
+                      : 'Owed now: ${money(owing < 0 ? 0 : owing)}. Tick only to pay more than that on purpose.'),
+                ),
               const SizedBox(height: 8),
               Align(
                 alignment: Alignment.centerLeft,
@@ -176,13 +188,15 @@ Future<bool> recordSupplierPayment(BuildContext context,
     if (ok != true || !context.mounted) return false;
     var saved = false;
     try {
-      await Supabase.instance.client.from('supplier_payments').insert({
-        'supplier_id': supplierId,
-        'grv_id': delivery?['id'],
-        'amount': double.parse(amount.text.replaceAll(',', '.')),
-        'method': method,
-        'paid_on': _d(day),
-        'note': note.text.trim().isEmpty ? null : note.text.trim(),
+      await Supabase.instance.client.rpc('record_supplier_payment', params: {
+        'p_id': payId,
+        'p_supplier': supplierId,
+        'p_grv': delivery?['id'],
+        'p_amount': double.parse(amount.text.replaceAll(',', '.')),
+        'p_method': method,
+        'p_paid_on': _d(day),
+        'p_note': note.text.trim(),
+        'p_advance': advance,
       });
       saved = true;
     } on PostgrestException catch (e) {
