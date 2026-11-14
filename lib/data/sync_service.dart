@@ -72,6 +72,7 @@ class SyncService extends ChangeNotifier {
     'products',
     'modifiers',
     'suppliers',
+    'stock_categories',
     'stock_items',
     'recipe_lines',
     'grvs',

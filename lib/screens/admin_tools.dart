@@ -7,6 +7,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../config.dart';
 import '../data/local_store.dart';
+import '../data/repo.dart';
 import '../data/sync_service.dart';
 import '../receipt/download_file.dart';
 import '../receipt/receipt_service.dart';
@@ -87,6 +88,37 @@ class _AdminToolsState extends State<AdminTools> {
     if (mounted) setState(() => _busy = false);
   }
 
+  Future<void> _goLive() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Go live?'),
+        content: const SizedBox(
+          width: 420,
+          child: Text('Press this on your first real trading day, after clearing test sales. '
+              'From then on sales can never be cleared, so real invoices and their numbers are kept (SARS needs them for five years). '
+              'This cannot be switched back from the app.'),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Not yet')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Go live')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    setState(() => _busy = true);
+    try {
+      await _db.rpc('go_live');
+      await SyncService.instance.syncNow();
+      _say('You are live. Clearing sales is now switched off.');
+    } on PostgrestException catch (e) {
+      _say(e.message);
+    } catch (_) {
+      _say('This needs an internet connection.');
+    }
+    if (mounted) setState(() => _busy = false);
+  }
+
   Future<void> _clearSales() async {
     final c = TextEditingController();
     final ok = await showDialog<bool>(
@@ -98,7 +130,7 @@ class _AdminToolsState extends State<AdminTools> {
             width: 420,
             child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
               const Text(
-                  'Use this once, before you start trading, to remove test orders. It deletes every order, payment, refund and cash-up, '
+                  'Use this once, before you start trading, to remove test orders. It deletes every order, payment, refund, cash-up, day close and till payout, '
                   'puts back the stock those sales used, and starts invoice numbers again at 1. '
                   'The menu, recipes, stock items, deliveries, suppliers and staff stay. This cannot be undone, so download a backup first.'),
               const SizedBox(height: 12),
@@ -295,12 +327,22 @@ class _AdminToolsState extends State<AdminTools> {
         Wrap(spacing: 10, runSpacing: 10, children: [
           FilledButton.icon(
               onPressed: _busy ? null : _backup, icon: const Icon(Icons.download), label: const Text('Download backup')),
-          OutlinedButton.icon(
-              style: OutlinedButton.styleFrom(foregroundColor: Brand.red),
-              onPressed: _busy ? null : _clearSales,
-              icon: const Icon(Icons.delete_sweep_outlined),
-              label: const Text('Clear test sales before going live')),
+          if (companyRow()?['live_since'] == null) ...[
+            OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(foregroundColor: Brand.red),
+                onPressed: _busy ? null : _clearSales,
+                icon: const Icon(Icons.delete_sweep_outlined),
+                label: const Text('Clear test sales before going live')),
+            FilledButton.tonalIcon(
+                onPressed: _busy ? null : _goLive, icon: const Icon(Icons.flag_outlined), label: const Text('Go live')),
+          ],
         ]),
+        if (companyRow()?['live_since'] != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text('Live since ${'${companyRow()!['live_since']}'.split('T').first}. Sales can no longer be cleared.',
+                style: const TextStyle(color: Brand.green, fontWeight: FontWeight.w600)),
+          ),
         if (_status != null) Padding(padding: const EdgeInsets.only(top: 8), child: Text(_status!)),
       ]),
       card('Change history', [

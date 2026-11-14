@@ -139,7 +139,7 @@ class _LevelsTabState extends State<_LevelsTab> {
       listenable: SyncService.instance,
       builder: (context, _) {
         final all = _items().where((i) => i['active'] != false).toList();
-        final cats = ['All', ...{for (final i in all) '${i['category']}'}..remove('null')];
+        final cats = ['All', ...(_categoryNames()..sort())];
         if (!cats.contains(_category)) _category = 'All';
         bool low(Map<String, dynamic> i) =>
             n(i['min_level']) > 0 && n(i['qty_on_hand']) <= n(i['min_level']);
@@ -247,6 +247,12 @@ class _LevelsTabState extends State<_LevelsTab> {
               items: [for (final c in cats) DropdownMenuItem(value: c, child: Text(c))],
               onChanged: (v) => setState(() => _category = v ?? 'All'),
             ),
+            if (AuthService.instance.role == 'admin')
+              OutlinedButton.icon(
+                onPressed: () => _manageCategories(context),
+                icon: const Icon(Icons.category_outlined),
+                label: const Text('Categories'),
+              ),
             FilledButton.icon(
               onPressed: () => _editItem(context, null),
               icon: const Icon(Icons.add),
@@ -342,6 +348,129 @@ class _LevelsTabState extends State<_LevelsTab> {
               ? '${item['name']} has history, so it is hidden from the list and the history is kept.'
               : '${item['name']} deleted.')));
     }
+  }
+
+  /// Every stock category: the saved list plus any name already used on an item.
+  List<String> _categoryNames() => {
+        for (final c in LocalStore.rows('stock_categories')) if ('${c['name'] ?? ''}'.trim().isNotEmpty) '${c['name']}'.trim(),
+        for (final i in _items()) if ('${i['category'] ?? ''}'.trim().isNotEmpty) '${i['category']}'.trim(),
+      }.toList();
+
+  /// Add, rename and delete stock categories (admin).
+  Future<void> _manageCategories(BuildContext context) async {
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(builder: (ctx, set) {
+        final names = _categoryNames()..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+        int count(String c) => _items().where((i) => '${i['category'] ?? ''}'.trim() == c).length;
+        Future<void> run(Future<void> Function() f) async {
+          if (await _online(ctx, f)) {
+            await SyncService.instance.syncNow();
+            set(() {});
+          }
+        }
+
+        Future<String?> ask(String title, String initial) {
+          final c = TextEditingController(text: initial);
+          return showDialog<String>(
+            context: ctx,
+            builder: (d) => AlertDialog(
+              title: Text(title),
+              content: TextField(controller: c, autofocus: true, decoration: const InputDecoration(labelText: 'Category name')),
+              actions: [
+                TextButton(onPressed: () => Navigator.pop(d), child: const Text('Cancel')),
+                FilledButton(onPressed: () => Navigator.pop(d, c.text.trim()), child: const Text('Save')),
+              ],
+            ),
+          );
+        }
+
+        Future<void> delete(String name) async {
+          final others = names.where((x) => x != name).toList();
+          final n = count(name);
+          String? moveTo = others.isEmpty ? null : others.first;
+          final go = await showDialog<bool>(
+            context: ctx,
+            builder: (d) => StatefulBuilder(
+              builder: (d, set2) => AlertDialog(
+                title: Text('Delete "$name"?'),
+                content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(n == 0 ? 'No stock items use this category.' : '$n stock items are in this category. Move them to:'),
+                  if (n > 0 && others.isNotEmpty)
+                    DropdownButton<String>(
+                      value: moveTo,
+                      isExpanded: true,
+                      items: [for (final o in others) DropdownMenuItem(value: o, child: Text(o))],
+                      onChanged: (v) => set2(() => moveTo = v),
+                    ),
+                  if (n > 0 && others.isEmpty) const Text('Add another category first so the items have somewhere to go.'),
+                ]),
+                actions: [
+                  TextButton(onPressed: () => Navigator.pop(d, false), child: const Text('Cancel')),
+                  FilledButton(
+                      style: FilledButton.styleFrom(backgroundColor: Brand.red, foregroundColor: Colors.white),
+                      onPressed: n > 0 && moveTo == null ? null : () => Navigator.pop(d, true),
+                      child: const Text('Delete')),
+                ],
+              ),
+            ),
+          );
+          if (go != true) return;
+          await run(() => _db.rpc('delete_stock_category', params: {'p_name': name, 'p_move_to': moveTo}));
+        }
+
+        return AlertDialog(
+          title: const Text('Stock categories'),
+          content: SizedBox(
+            width: 440,
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              Align(
+                alignment: Alignment.centerLeft,
+                child: FilledButton.icon(
+                  icon: const Icon(Icons.add),
+                  label: const Text('Add category'),
+                  onPressed: () async {
+                    final v = await ask('Add category', '');
+                    if (v == null || v.isEmpty) return;
+                    await run(() => _db.from('stock_categories').insert({'name': v}));
+                  },
+                ),
+              ),
+              const SizedBox(height: 8),
+              Flexible(
+                child: ListView(shrinkWrap: true, children: [
+                  for (final c in names)
+                    ListTile(
+                      dense: true,
+                      title: Text(c, style: const TextStyle(fontWeight: FontWeight.w600)),
+                      subtitle: Text('${count(c)} items'),
+                      trailing: Wrap(spacing: 4, children: [
+                        TextButton(
+                            onPressed: () async {
+                              final v = await ask('Rename "$c"', c);
+                              if (v == null || v.isEmpty || v == c) return;
+                              await run(() => _db.rpc('rename_stock_category', params: {'p_old': c, 'p_new': v}));
+                              if (_category == c) _category = v;
+                            },
+                            child: const Text('Rename')),
+                        TextButton(
+                            style: TextButton.styleFrom(foregroundColor: Brand.red),
+                            onPressed: () => delete(c),
+                            child: const Text('Delete')),
+                      ]),
+                    ),
+                ]),
+              ),
+              const SizedBox(height: 6),
+              const Text('Renaming to a name that already exists joins the two categories.',
+                  style: TextStyle(color: Brand.muted, fontSize: 12)),
+            ]),
+          ),
+          actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Done'))],
+        );
+      }),
+    );
+    if (mounted) setState(() {});
   }
 
   /// Stock take, waste or manual correction. Recorded as a movement so there is a history.
@@ -441,7 +570,7 @@ class _LevelsTabState extends State<_LevelsTab> {
     final packUnit = TextEditingController(text: '${item?['purchase_unit'] ?? ''}');
     final packFactor = TextEditingController(
         text: item == null || n(item['purchase_factor']) <= 1 ? '' : _qty(item['purchase_factor']));
-    final cats = {for (final i in _items()) if ('${i['category'] ?? ''}'.isNotEmpty) '${i['category']}'}.toList()..sort();
+    final cats = _categoryNames()..sort();
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => StatefulBuilder(builder: (ctx, set) {
