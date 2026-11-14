@@ -7,6 +7,7 @@ import 'auth/auth_service.dart';
 import 'config.dart';
 import 'data/db_profiles.dart';
 import 'data/local_store.dart';
+import 'data/pg_client.dart';
 import 'data/sync_service.dart';
 import 'platform/error_log.dart';
 import 'platform/tab_guard.dart';
@@ -14,14 +15,19 @@ import 'screens/login_screen.dart';
 import 'screens/shell.dart';
 import 'theme.dart';
 
+/// Global PgClient for the app — null when using Supabase.
+PgClient? globalPgClient;
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await LocalStore.init();
-  LocalStore.currentUser = () => Supabase.instance.client.auth.currentUser?.id;
-  await Supabase.initialize(
-    url: DbProfiles.url,
-    anonKey: DbProfiles.key,
-  );
+
+  if (DbProfiles.isPostgres) {
+    await _initPostgres();
+  } else {
+    await _initSupabase();
+  }
+
   await AuthService.instance.restore();
 
   FlutterError.onError = (details) {
@@ -34,12 +40,50 @@ Future<void> main() async {
   };
   TabGuard.instance.start();
 
-  Supabase.instance.client.auth.onAuthStateChange.listen((state) {
-    if (state.session != null) SyncService.instance.syncNow();
-  });
+  if (!DbProfiles.isPostgres) {
+    Supabase.instance.client.auth.onAuthStateChange.listen((state) {
+      if (state.session != null) SyncService.instance.syncNow();
+    });
+  }
   SyncService.instance.start();
 
   runApp(const PosApp());
+}
+
+Future<void> _initSupabase() async {
+  LocalStore.currentUser = () => Supabase.instance.client.auth.currentUser?.id;
+  await Supabase.initialize(
+    url: DbProfiles.url,
+    anonKey: DbProfiles.key,
+  );
+  SyncService.instance.useSupabase();
+}
+
+Future<void> _initPostgres() async {
+  // currentUser reads from AuthService in postgres mode.
+  LocalStore.currentUser = () => AuthService.instance.localUserId;
+  try {
+    globalPgClient = await PgClient.connect(
+      host: DbProfiles.pgHost,
+      port: DbProfiles.pgPort,
+      database: DbProfiles.pgDatabase,
+      username: DbProfiles.pgUsername,
+      password: DbProfiles.pgPassword,
+    );
+    AuthService.instance.pgClient = globalPgClient;
+    SyncService.instance.usePostgres(globalPgClient!);
+  } catch (e) {
+    // Connection may fail if the database is not ready yet.
+    // The app will show an error at sign-in time.
+    ErrorLog.record(e, StackTrace.current);
+  }
+
+  // Supabase still needs to be initialized (many widgets reference it), but
+  // we use a dummy url/key so it never actually connects.
+  await Supabase.initialize(
+    url: 'http://127.0.0.1:0',
+    anonKey: 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiIiLCJpYXQiOjAsImV4cCI6MjAwMDAwMDAwMCwicm9sZSI6ImFub24ifQ.placeholder-key-for-offline-mode-not-used',
+  );
 }
 
 class PosApp extends StatelessWidget {

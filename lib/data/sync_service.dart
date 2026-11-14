@@ -4,8 +4,12 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../auth/auth_service.dart';
+import 'db_profiles.dart';
 import 'local_store.dart';
 import 'outbox_pusher.dart';
+import 'pg_client.dart';
+import 'postgres_backend.dart';
 
 /// Sends changes to Supabase. A refusal from the server becomes a
 /// [RefusedException]; connection problems are passed on unchanged so the
@@ -49,20 +53,34 @@ class SupabaseBackend implements SyncBackend {
   }
 }
 
-/// Keeps the device copy and Supabase in step.
+/// Keeps the device copy and the backend in step.
 ///
 /// 1. Sends everything waiting in the outbox (oldest first, changed fields only).
 /// 2. Downloads fresh copies of the tables this staff member may see.
-/// 3. Listens for live changes (kitchen queue, stock levels).
+/// 3. Listens for live changes (kitchen queue, stock levels) — Supabase mode only.
 ///
-/// If the internet is down nothing breaks: the app keeps using the device copy
+/// If the connection is down nothing breaks: the app keeps using the device copy
 /// and tries again every 30 seconds and whenever the connection returns.
 class SyncService extends ChangeNotifier {
   SyncService._();
   static final instance = SyncService._();
 
+  /// The active backend — set from main.dart based on the active profile.
+  SyncBackend _backend = SupabaseBackend();
+  PostgresBackend? _pgBackend;
+
+  void useSupabase() {
+    _backend = SupabaseBackend();
+    _pgBackend = null;
+  }
+
+  void usePostgres(PgClient pg) {
+    final b = PostgresBackend(pg);
+    _backend = b;
+    _pgBackend = b;
+  }
+
   SupabaseClient get _db => Supabase.instance.client;
-  final SyncBackend _backend = SupabaseBackend();
 
   /// Order matters: parents before children.
   static const pullTables = [
@@ -120,7 +138,12 @@ class SyncService extends ChangeNotifier {
 
   /// Safe to call often: a call made while a sync is running schedules one more.
   Future<void> syncNow() async {
-    if (_db.auth.currentSession == null) return;
+    // Guard: need either a Supabase session or a local postgres user.
+    if (DbProfiles.isPostgres) {
+      if (AuthService.instance.localUserId == null) return;
+    } else {
+      if (_db.auth.currentSession == null) return;
+    }
     if (syncing) {
       _again = true;
       return;
@@ -128,7 +151,7 @@ class SyncService extends ChangeNotifier {
     syncing = true;
     notifyListeners();
     try {
-      final me = _db.auth.currentUser?.id;
+      final me = AuthService.instance.currentUserId;
       final role = '${LocalStore.row('staff_profiles', me)?['role'] ?? ''}';
       final pushed = await pushOutbox(_backend, userId: me, manager: role == 'admin' || role == 'supervisor');
       waitingForOthers = pushed.otherUser;
@@ -139,7 +162,7 @@ class SyncService extends ChangeNotifier {
         if (full || _busyTables.contains(t)) await _pull(t);
       }
       if (full) _lastFull = DateTime.now();
-      _subscribe();
+      if (!DbProfiles.isPostgres) _subscribe();
       lastSync = DateTime.now();
       lastError = pushed.lastError;
       online = true;
@@ -172,6 +195,14 @@ class SyncService extends ChangeNotifier {
   }
 
   Future<void> _pull(String table) async {
+    if (DbProfiles.isPostgres && _pgBackend != null) {
+      await _pullPostgres(table);
+    } else {
+      await _pullSupabase(table);
+    }
+  }
+
+  Future<void> _pullSupabase(String table) async {
     List<dynamic> data;
     if (table == 'orders') {
       final since = DateTime.now().subtract(const Duration(days: 2)).toUtc().toIso8601String();
@@ -188,6 +219,20 @@ class SyncService extends ChangeNotifier {
     }
     final server = data.map((e) => Map<String, dynamic>.from(e as Map)).toList();
     await LocalStore.setRows(table, withPending(table, server));
+    notifyListeners();
+  }
+
+  Future<void> _pullPostgres(String table) async {
+    List<Map<String, dynamic>> data;
+    if (table == 'orders') {
+      data = await _pgBackend!.selectOrders(2);
+    } else if (table == 'order_items' || table == 'payments') {
+      final ids = LocalStore.rows('orders').map((o) => '${o['id']}').toList();
+      data = await _pgBackend!.selectByOrderIds(table, ids);
+    } else {
+      data = await _pgBackend!.selectAll(table);
+    }
+    await LocalStore.setRows(table, withPending(table, data));
     notifyListeners();
   }
 

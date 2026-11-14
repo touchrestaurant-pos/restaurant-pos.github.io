@@ -28,6 +28,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
   /// Company name and logo are public, so the login screen can show them.
   Future<void> _loadBrand() async {
+    if (DbProfiles.isPostgres) return; // Skip Supabase call in postgres mode.
     try {
       final row = await Supabase.instance.client
           .from('company_settings')
@@ -44,20 +45,20 @@ class _LoginScreenState extends State<LoginScreen> {
 
   bool _restart = false;
 
-  /// Pick which database this device uses, or add another one (for example the store's local server).
+  /// Pick which database this device uses, or add another one.
   Future<void> _chooseDatabase() async {
     final started = DbProfiles.activeName;
     await showDialog<void>(
       context: context,
       builder: (ctx) => StatefulBuilder(builder: (ctx, set) {
-        Future<void> add() async {
+        Future<void> addSupabase() async {
           final name = TextEditingController(), url = TextEditingController(), key = TextEditingController();
           String? err;
           final ok = await showDialog<bool>(
             context: ctx,
             builder: (d) => StatefulBuilder(
               builder: (d, set2) => AlertDialog(
-                title: const Text('Add a database'),
+                title: const Text('Add Supabase database'),
                 content: SizedBox(
                   width: 420,
                   child: Column(mainAxisSize: MainAxisSize.min, children: [
@@ -97,6 +98,76 @@ class _LoginScreenState extends State<LoginScreen> {
           }
         }
 
+        Future<void> addPostgres() async {
+          final name = TextEditingController();
+          final host = TextEditingController(text: '127.0.0.1');
+          final port = TextEditingController(text: '5432');
+          final database = TextEditingController(text: 'restopos');
+          final username = TextEditingController(text: 'postgres');
+          final password = TextEditingController();
+          String? err;
+          final ok = await showDialog<bool>(
+            context: ctx,
+            builder: (d) => StatefulBuilder(
+              builder: (d, set2) => AlertDialog(
+                title: const Text('Add local database'),
+                content: SizedBox(
+                  width: 420,
+                  child: Column(mainAxisSize: MainAxisSize.min, children: [
+                    TextField(controller: name, decoration: const InputDecoration(labelText: 'Name (for example Main store)')),
+                    const SizedBox(height: 8),
+                    Row(children: [
+                      Expanded(child: TextField(controller: host, decoration: const InputDecoration(labelText: 'Host'))),
+                      const SizedBox(width: 8),
+                      SizedBox(width: 80, child: TextField(controller: port, decoration: const InputDecoration(labelText: 'Port'))),
+                    ]),
+                    const SizedBox(height: 8),
+                    TextField(controller: database, decoration: const InputDecoration(labelText: 'Database name')),
+                    const SizedBox(height: 8),
+                    Row(children: [
+                      Expanded(child: TextField(controller: username, decoration: const InputDecoration(labelText: 'Username'))),
+                      const SizedBox(width: 8),
+                      Expanded(
+                          child: TextField(
+                              controller: password,
+                              obscureText: true,
+                              decoration: const InputDecoration(labelText: 'Password'))),
+                    ]),
+                    const SizedBox(height: 6),
+                    const Text('These are the PostgreSQL connection details on the store computer.',
+                        style: TextStyle(color: Brand.muted, fontSize: 12)),
+                    if (err != null)
+                      Padding(padding: const EdgeInsets.only(top: 8), child: Text(err!, style: const TextStyle(color: Brand.red))),
+                  ]),
+                ),
+                actions: [
+                  TextButton(onPressed: () => Navigator.pop(d, false), child: const Text('Cancel')),
+                  FilledButton(
+                      onPressed: () {
+                        final e = DbProfiles.checkPostgres(
+                            name.text, host.text, port.text, database.text, username.text, password.text);
+                        if (e != null) {
+                          set2(() => err = e);
+                        } else {
+                          Navigator.pop(d, true);
+                        }
+                      },
+                      child: const Text('Save')),
+                ],
+              ),
+            ),
+          );
+          if (ok == true) {
+            await DbProfiles.savePostgres(name.text, host.text, port.text, database.text, username.text, password.text);
+            set(() {});
+          }
+        }
+
+        String subtitle(Map<String, String> p) {
+          if (p['type'] == 'postgres') return '${p['host']}:${p['port']}/${p['database']}';
+          return p['url'] ?? '';
+        }
+
         return AlertDialog(
           title: const Text('Which database?'),
           content: SizedBox(
@@ -109,7 +180,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   leading: Icon(p['name'] == DbProfiles.activeName ? Icons.radio_button_checked : Icons.radio_button_off,
                       color: Brand.navy),
                   title: Text(p['name']!, style: const TextStyle(fontWeight: FontWeight.w700)),
-                  subtitle: Text(p['url']!, style: const TextStyle(fontSize: 12)),
+                  subtitle: Text(subtitle(p), style: const TextStyle(fontSize: 12)),
                   trailing: p['name'] == DbProfiles.onlineName
                       ? null
                       : IconButton(
@@ -130,7 +201,12 @@ class _LoginScreenState extends State<LoginScreen> {
                   },
                 ),
               const SizedBox(height: 6),
-              OutlinedButton.icon(onPressed: add, icon: const Icon(Icons.add), label: const Text('Add a database')),
+              Wrap(spacing: 8, children: [
+                OutlinedButton.icon(
+                    onPressed: addPostgres, icon: const Icon(Icons.dns), label: const Text('Add local database')),
+                OutlinedButton.icon(
+                    onPressed: addSupabase, icon: const Icon(Icons.cloud), label: const Text('Add cloud database')),
+              ]),
               const SizedBox(height: 8),
               const Text(
                   'Each database has its own staff, menu, stock and sales. Switching removes this device\'s copy of the old one (nothing is deleted on the server).',
@@ -234,7 +310,11 @@ class _LoginScreenState extends State<LoginScreen> {
                 const SizedBox(height: 8),
                 TextButton.icon(
                   onPressed: _chooseDatabase,
-                  icon: const Icon(Icons.storage, size: 16, color: Color(0xFFB8C3DE)),
+                  icon: Icon(
+                    DbProfiles.isPostgres ? Icons.dns : Icons.cloud,
+                    size: 16,
+                    color: const Color(0xFFB8C3DE),
+                  ),
                   label: Text('Database: ${DbProfiles.activeName}',
                       style: const TextStyle(color: Color(0xFFB8C3DE), fontSize: 13)),
                 ),

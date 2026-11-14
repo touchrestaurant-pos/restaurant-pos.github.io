@@ -1,8 +1,8 @@
 import 'dart:math';
 
 import 'package:intl/intl.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../auth/auth_service.dart';
 import 'local_store.dart';
 
 num n(dynamic v) => num.tryParse('$v') ?? 0;
@@ -254,7 +254,7 @@ TenderResult splitTender(
 /// uploaded later, so it works without internet.
 class OrderRepo {
   static String _nowIso() => DateTime.now().toUtc().toIso8601String();
-  static String? get _me => Supabase.instance.client.auth.currentUser?.id;
+  static String? get _me => AuthService.instance.currentUserId;
 
   static Future<String> _deviceCode() async {
     var code = LocalStore.getMeta('device_code') as String?;
