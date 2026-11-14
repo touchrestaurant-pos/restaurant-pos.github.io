@@ -62,6 +62,19 @@ void main() {
     expect(server.rows['order_items']!['i1']!['order_id'], 'o1');
   });
 
+  test('a sale waits for the cashier who made it; a manager may send it', () async {
+    final server = FakeServer();
+    LocalStore.currentUser = () => 'cashierA';
+    await LocalStore.insert('orders', {'id': 'o1', 'total': 20});
+    LocalStore.currentUser = null;
+    var r = await pushOutbox(server, userId: 'cashierB');
+    expect(r.otherUser, 1);
+    expect(LocalStore.pendingCount, 1);
+    r = await pushOutbox(server, userId: 'admin1', manager: true);
+    expect(r.sent, 1);
+    expect(server.rows['orders']!['o1']!['total'], 20);
+  });
+
   test('a change made before the row was sent is folded into the new row', () async {
     await LocalStore.insert('orders', {'id': 'o1', 'status': 'new', 'paid': false});
     await LocalStore.patch('orders', 'o1', {'paid': true});

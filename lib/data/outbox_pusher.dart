@@ -24,6 +24,9 @@ abstract class SyncBackend {
 class PushResult {
   int sent = 0;
   int refused = 0;
+
+  /// Changes made by another login on this device, waiting for that person (or a manager) to sign in.
+  int otherUser = 0;
   String? lastError;
 }
 
@@ -34,7 +37,10 @@ class PushResult {
 /// - A refused change is retried on later syncs and listed as "not saved" after
 ///   [LocalStore.maxAttempts] refusals.
 /// - A connection error stops the upload; everything stays queued.
-Future<PushResult> pushOutbox(SyncBackend backend) async {
+/// [userId] is who is signed in now. A change made by a different login is held until that
+/// person signs in again, so a cashier's sales never upload under someone else's name.
+/// [manager] (admin or supervisor) may send anyone's changes: the rows keep who made them.
+Future<PushResult> pushOutbox(SyncBackend backend, {String? userId, bool manager = false}) async {
   final result = PushResult();
   final heldBack = <String>{};
   for (final entry in LocalStore.pending()) {
@@ -45,6 +51,12 @@ Future<PushResult> pushOutbox(SyncBackend backend) async {
       continue;
     }
     if (heldBack.contains(key)) continue;
+    final owner = item['user'];
+    if (owner != null && userId != null && owner != userId && !manager) {
+      heldBack.add(key);
+      result.otherUser++;
+      continue;
+    }
     final table = item['table'] as String;
     try {
       switch (item['op']) {

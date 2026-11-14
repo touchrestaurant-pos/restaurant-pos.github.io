@@ -99,6 +99,9 @@ class SyncService extends ChangeNotifier {
   RealtimeChannel? _channel;
 
   int get pendingCount => LocalStore.pendingCount;
+
+  /// Changes made by someone else on this device that wait for them (or a manager) to sign in.
+  int waitingForOthers = 0;
   int get failedCount => LocalStore.failedCount;
 
   void start() {
@@ -125,7 +128,10 @@ class SyncService extends ChangeNotifier {
     syncing = true;
     notifyListeners();
     try {
-      final pushed = await pushOutbox(_backend);
+      final me = _db.auth.currentUser?.id;
+      final role = '${LocalStore.row('staff_profiles', me)?['role'] ?? ''}';
+      final pushed = await pushOutbox(_backend, userId: me, manager: role == 'admin' || role == 'supervisor');
+      waitingForOthers = pushed.otherUser;
       // Orders and stock change all day; the menu, staff and suppliers rarely do,
       // so those are refreshed every 5 minutes (or straight away after a manual sync).
       final full = _lastFull == null || DateTime.now().difference(_lastFull!) > const Duration(minutes: 5);

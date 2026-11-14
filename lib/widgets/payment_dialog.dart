@@ -6,6 +6,7 @@ import '../auth/permissions.dart';
 
 import '../data/accounts_repo.dart';
 import '../data/repo.dart';
+import '../data/sync_service.dart';
 import '../theme.dart';
 import 'account_picker.dart';
 
@@ -67,6 +68,7 @@ class _PaymentDialogState extends State<_PaymentDialog> {
   late bool _cashOk;
   late bool _cardOk;
   late bool _eftOk;
+  late bool _eftOffline;
   late String _eftDetails;
   final _cash = TextEditingController();
   final _card = TextEditingController();
@@ -81,7 +83,9 @@ class _PaymentDialogState extends State<_PaymentDialog> {
     final c = companyRow();
     _cashOk = c?['accept_cash'] != false;
     _cardOk = c?['accept_card_manual'] != false;
-    _eftOk = c?['accept_eft'] == true && Perms.canTakeEft;
+    // EFT needs the internet so the payment can be checked by the server before the slip is printed.
+    _eftOk = c?['accept_eft'] == true && Perms.canTakeEft && SyncService.instance.online;
+    _eftOffline = c?['accept_eft'] == true && Perms.canTakeEft && !SyncService.instance.online;
     _eftDetails = '${c?['eft_details'] ?? ''}'.trim();
     if (!_cashOk && !_cardOk && !_eftOk) _cashOk = true;
   }
@@ -244,6 +248,12 @@ class _PaymentDialogState extends State<_PaymentDialog> {
                         style: const TextStyle(fontWeight: FontWeight.w700, color: Brand.navy)),
                   ),
               ],
+              if (_eftOffline)
+                const Padding(
+                  padding: EdgeInsets.only(top: 10),
+                  child: Text('EFT needs the internet. Take cash or card, or wait until the till is back online.',
+                      style: TextStyle(color: Brand.muted, fontSize: 12)),
+                ),
               if (_eftOk) ...[
                 const SizedBox(height: 12),
                 amountField(_eft, 'EFT / bank transfer amount', focus: !_cashOk && !_cardOk),

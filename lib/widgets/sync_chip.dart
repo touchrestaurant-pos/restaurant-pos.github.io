@@ -32,7 +32,9 @@ class SyncChip extends StatelessWidget {
         final label = failed > 0
             ? '$failed not saved'
             : s.online
-                ? (waiting > 0 ? 'Online · $waiting waiting' : 'Online · synced')
+                ? (s.waitingForOthers > 0 && s.waitingForOthers == waiting
+                    ? 'Online · $waiting for another login'
+                    : (waiting > 0 ? 'Online · $waiting waiting' : 'Online · synced'))
                 : 'Offline · $waiting waiting';
         return InkWell(
           onTap: () => showDialog<void>(context: context, builder: (_) => const _SyncDialog()),

@@ -59,7 +59,8 @@ class _ShellState extends State<Shell> {
         builder: (ctx) => AlertDialog(
           title: const Text('Some changes have not been sent'),
           content: Text('${LocalStore.pendingCount} changes on this device have not reached the server yet. '
-              'Stay signed in with the internet on until the sync light is green. Sign out anyway?'),
+              'Stay signed in with the internet on until the sync light is green. '
+              'If you sign out, they stay on this device and are sent the next time you (or a manager) sign in here. Sign out anyway?'),
           actions: [
             TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Stay signed in')),
             FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Sign out anyway')),

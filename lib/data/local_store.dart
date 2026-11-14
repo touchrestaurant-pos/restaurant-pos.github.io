@@ -130,7 +130,12 @@ class LocalStore {
 
   // ---- outbox -------------------------------------------------------------
 
+  /// Who is signed in (set by the app). Each waiting change remembers who made it.
+  static String? Function()? currentUser;
+
   static Future<void> _put(Map<String, dynamic> item) async {
+    final who = currentUser?.call();
+    if (who != null) item['user'] = who;
     final key = '${DateTime.now().microsecondsSinceEpoch.toString().padLeft(17, '0')}-${_uuid.v4()}';
     await _outbox.put(key, item);
   }

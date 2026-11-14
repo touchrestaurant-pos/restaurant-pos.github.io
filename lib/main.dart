@@ -16,6 +16,7 @@ import 'theme.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await LocalStore.init();
+  LocalStore.currentUser = () => Supabase.instance.client.auth.currentUser?.id;
   await Supabase.initialize(
     url: AppConfig.supabaseUrl,
     anonKey: AppConfig.supabaseKey,
