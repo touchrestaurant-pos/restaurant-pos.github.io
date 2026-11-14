@@ -38,7 +38,7 @@ Future<int> createPurchaseOrdersFromReorder(List<Map<String, dynamic>> reorder) 
         .insert({'supplier_id': e.key, 'notes': 'From the buying list'})
         .select('id')
         .single();
-    await _db.from('purchase_order_lines').insert([
+    await AppDb.from('purchase_order_lines').insert([
       for (final r in e.value)
         {
           'po_id': po['id'],
@@ -286,13 +286,13 @@ class _PoEditorState extends State<_PoEditor> {
         if (status != null) 'status': status,
       };
       if (_id == null) {
-        final row = await _db.from('purchase_orders').insert(head).select('id').single();
+        final row = await AppDb.from('purchase_orders').insert(head).select('id').single();
         _id = row['id'] as String;
       } else {
-        await _db.from('purchase_orders').update(head).eq('id', _id!);
-        await _db.from('purchase_order_lines').delete().eq('po_id', _id!);
+        await AppDb.from('purchase_orders').update(head).eq('id', _id!);
+        await AppDb.from('purchase_order_lines').delete().eq('po_id', _id!);
       }
-      await _db.from('purchase_order_lines').insert([
+      await AppDb.from('purchase_order_lines').insert([
         for (final l in _lines) {'po_id': _id, 'stock_item_id': l.itemId, 'qty': l.q, 'unit_cost': l.c}
       ]);
       if (status != null) _status = status;
@@ -311,7 +311,7 @@ class _PoEditorState extends State<_PoEditor> {
 
   Future<String> _poNo() async {
     if (_id == null) return 'PO';
-    final r = await _db.from('purchase_orders').select('po_no').eq('id', _id!).single();
+    final r = await AppDb.from('purchase_orders').select('po_no').eq('id', _id!).single();
     return '${r['po_no']}';
   }
 
@@ -436,7 +436,7 @@ class _PoEditorState extends State<_PoEditor> {
       return;
     }
     try {
-      await _db.from('purchase_orders').update({'status': 'cancelled'}).eq('id', _id!);
+      await AppDb.from('purchase_orders').update({'status': 'cancelled'}).eq('id', _id!);
       if (mounted) Navigator.pop(context);
     } catch (_) {
       _say('This needs an internet connection.');

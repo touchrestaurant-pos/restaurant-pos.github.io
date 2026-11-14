@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../data/app_db.dart';
 import '../data/local_store.dart';
 import '../data/repo.dart';
 import '../data/sync_service.dart';
@@ -331,7 +332,7 @@ class _MenuScreenState extends State<MenuScreen> {
     if (action == 'price') {
       final v = double.parse(priceCtl.text.replaceAll(',', '.'));
       await _online(context, () async {
-        await _db.from('products').update({'price': v}).eq('id', id);
+        await AppDb.from('products').update({'price': v}).eq('id', id);
       });
       return;
     }
@@ -377,9 +378,9 @@ class _MenuScreenState extends State<MenuScreen> {
     await _online(context, () async {
       if (c == null) {
         final max = LocalStore.rows('categories').fold<num>(0, (m, e) => n(e['sort_order']) > m ? n(e['sort_order']) : m);
-        await _db.from('categories').insert({'name': name.text.trim(), 'active': active, 'sort_order': max + 1});
+        await AppDb.from('categories').insert({'name': name.text.trim(), 'active': active, 'sort_order': max + 1});
       } else {
-        await _db.from('categories').update({'name': name.text.trim(), 'active': active}).eq('id', c['id']);
+        await AppDb.from('categories').update({'name': name.text.trim(), 'active': active}).eq('id', c['id']);
       }
     });
   }
@@ -469,9 +470,9 @@ class _MenuScreenState extends State<MenuScreen> {
     await _online(context, () async {
       if (p == null) {
         final max = LocalStore.rows('products').fold<num>(0, (m, e) => n(e['sort_order']) > m ? n(e['sort_order']) : m);
-        await _db.from('products').insert({...row, 'sort_order': max + 1});
+        await AppDb.from('products').insert({...row, 'sort_order': max + 1});
       } else {
-        await _db.from('products').update(row).eq('id', p['id']);
+        await AppDb.from('products').update(row).eq('id', p['id']);
       }
     });
   }
@@ -571,9 +572,9 @@ class _RecipeDialogState extends State<_RecipeDialog> {
     setState(() => _busy = true);
     final id = widget.product['id'];
     final ok = await _online(context, () async {
-      await _db.from('recipe_lines').delete().eq('product_id', id);
+      await AppDb.from('recipe_lines').delete().eq('product_id', id);
       if (_rows.isNotEmpty) {
-        await _db.from('recipe_lines').insert([
+        await AppDb.from('recipe_lines').insert([
           for (final r in _rows) {'product_id': id, 'stock_item_id': r.itemId, 'qty': r.q, 'waste_pct': r.w}
         ]);
       }

@@ -38,7 +38,7 @@ class _StocktakeTabState extends State<StocktakeTab> {
   Future<void> _load() async {
     setState(() => _loading = true);
     try {
-      final rows = await _db.from('stocktakes').select().order('created_at', ascending: false).limit(30);
+      final rows = await AppDb.from('stocktakes').select().order('created_at', ascending: false).limit(30);
       _list = rows.map((e) => Map<String, dynamic>.from(e)).toList();
     } catch (_) {
       if (mounted) _say('Stock-takes need an internet connection.');
@@ -134,7 +134,7 @@ class _StocktakeEditorState extends State<_StocktakeEditor> {
 
   Future<void> _load() async {
     try {
-      final rows = await _db.from('stocktake_lines').select().eq('stocktake_id', widget.take['id']);
+      final rows = await AppDb.from('stocktake_lines').select().eq('stocktake_id', widget.take['id']);
       _lines = rows.map((e) => Map<String, dynamic>.from(e)).toList()
         ..sort((a, b) {
           final ia = _item(a['stock_item_id']), ib = _item(b['stock_item_id']);

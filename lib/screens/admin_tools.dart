@@ -67,7 +67,7 @@ class _AdminToolsState extends State<AdminTools> {
       for (final t in _backupTables) {
         final rows = <dynamic>[];
         for (var from = 0;; from += 1000) {
-          final page = await _db.from(t).select().range(from, from + 999);
+          final page = await AppDb.from(t).select().range(from, from + 999);
           rows.addAll(page);
           if (page.length < 1000) break;
         }
@@ -198,7 +198,7 @@ class _AdminToolsState extends State<AdminTools> {
 
   Future<void> _loadAudit() async {
     try {
-      var q = _db.from('audit_log').select();
+      var q = AppDb.from('audit_log').select();
       if (_auditFilter != 'all') q = q.eq('table_name', _auditFilter);
       final rows = await q.order('at', ascending: false).limit(300);
       _audit = rows.map((e) => Map<String, dynamic>.from(e)).toList();
@@ -240,7 +240,7 @@ class _AdminToolsState extends State<AdminTools> {
 
   Future<void> _clearErrors() async {
     try {
-      await _db.from('app_errors').delete().gte('created_at', '2000-01-01');
+      await AppDb.from('app_errors').delete().gte('created_at', '2000-01-01');
     } catch (_) {}
     await LocalStore.removeMeta('errors');
     await _loadErrors();

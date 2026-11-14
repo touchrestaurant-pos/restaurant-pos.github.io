@@ -207,7 +207,7 @@ class _CashUpScreenState extends State<CashUpScreen> {
     );
     if (ok != true) return;
     try {
-      await _db.from('cash_movements').insert({
+      await AppDb.from('cash_movements').insert({
         'business_date': _d(_day),
         'kind': kind,
         'amount': double.parse(amount.text.replaceAll(',', '.')),
@@ -270,7 +270,7 @@ class _CashUpScreenState extends State<CashUpScreen> {
   /// The frozen figures, next to the live ones so late arrivals stand out.
   Future<void> _showClose() async {
     try {
-      final row = await _db.from('day_closes').select().eq('business_date', _d(_day)).single();
+      final row = await AppDb.from('day_closes').select().eq('business_date', _d(_day)).single();
       final sum = Map<String, dynamic>.from(row['summary'] as Map);
       final sm = Map<String, dynamic>.from((sum['summary'] as Map?) ?? const {});
       final cash = Map<String, dynamic>.from((sum['cash'] as Map?) ?? const {});
@@ -550,7 +550,7 @@ class _CashUpScreenState extends State<CashUpScreen> {
                           icon: const Icon(Icons.close, size: 18),
                           onPressed: () async {
                             try {
-                              await _db.from('cash_movements').delete().eq('id', m['id']);
+                              await AppDb.from('cash_movements').delete().eq('id', m['id']);
                               _load();
                             } catch (_) {}
                           }),

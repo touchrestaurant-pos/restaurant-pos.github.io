@@ -436,7 +436,7 @@ class _LevelsTabState extends State<_LevelsTab> {
                   onPressed: () async {
                     final v = await ask('Add category', '');
                     if (v == null || v.isEmpty) return;
-                    await run(() => _db.from('stock_categories').insert({'name': v}));
+                    await run(() => AppDb.from('stock_categories').insert({'name': v}));
                   },
                 ),
               ),
@@ -553,7 +553,7 @@ class _LevelsTabState extends State<_LevelsTab> {
     if (delta == 0) return;
     if (!context.mounted) return;
     await _online(context, () async {
-      await _db.from('stock_movements').insert({
+      await AppDb.from('stock_movements').insert({
         'stock_item_id': item['id'],
         'qty_change': delta,
         'reason': kind,
@@ -713,9 +713,9 @@ class _LevelsTabState extends State<_LevelsTab> {
     };
     await _online(context, () async {
       if (item == null) {
-        await _db.from('stock_items').insert(row);
+        await AppDb.from('stock_items').insert(row);
       } else {
-        await _db.from('stock_items').update(row).eq('id', item['id']);
+        await AppDb.from('stock_items').update(row).eq('id', item['id']);
       }
     });
   }
@@ -940,14 +940,14 @@ class GrvEditorState extends State<GrvEditor> {
       if (widget.grv == null) 'status': 'draft',
     };
     if (widget.grv == null) {
-      await _db.from('grvs').insert(head);
+      await AppDb.from('grvs').insert(head);
     } else {
       // An upsert would fail here: it checks grv_no before it notices the row already exists.
-      await _db.from('grvs').update(head).eq('id', id);
+      await AppDb.from('grvs').update(head).eq('id', id);
     }
-    await _db.from('grv_lines').delete().eq('grv_id', id);
+    await AppDb.from('grv_lines').delete().eq('grv_id', id);
     if (_lines.isNotEmpty) {
-      await _db.from('grv_lines').insert([
+      await AppDb.from('grv_lines').insert([
         for (final l in _lines)
           {
             'grv_id': id,
@@ -1046,7 +1046,7 @@ class GrvEditorState extends State<GrvEditor> {
     );
     if (go != true) return;
     final ok = await _online(context, () async {
-      await _db.from('grvs').delete().eq('id', widget.grv!['id']);
+      await AppDb.from('grvs').delete().eq('id', widget.grv!['id']);
     });
     if (ok && mounted) Navigator.pop(context);
   }
@@ -1348,7 +1348,7 @@ class _SuppliersTabState extends State<_SuppliersTab> {
       ),
     );
     if (ok != true || !mounted) return;
-    await _online(context, () => _db.from('suppliers').delete().eq('id', s['id']));
+    await _online(context, () => AppDb.from('suppliers').delete().eq('id', s['id']));
     _load();
   }
 
@@ -1587,9 +1587,9 @@ class _SuppliersTabState extends State<_SuppliersTab> {
     };
     await _online(context, () async {
       if (s == null) {
-        await _db.from('suppliers').insert(row);
+        await AppDb.from('suppliers').insert(row);
       } else {
-        await _db.from('suppliers').update(row).eq('id', s['id']);
+        await AppDb.from('suppliers').update(row).eq('id', s['id']);
       }
     });
     _load();

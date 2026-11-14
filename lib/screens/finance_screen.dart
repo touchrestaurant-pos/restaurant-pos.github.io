@@ -353,7 +353,7 @@ class _ExpensesTabState extends State<_ExpensesTab> {
               TextButton(
                   style: TextButton.styleFrom(foregroundColor: Brand.red),
                   onPressed: () async {
-                    await _guard(context, () => _db.from('expenses').delete().eq('id', e['id']));
+                    await _guard(context, () => AppDb.from('expenses').delete().eq('id', e['id']));
                     if (ctx.mounted) Navigator.pop(ctx, false);
                     _load();
                   },
@@ -376,9 +376,9 @@ class _ExpensesTabState extends State<_ExpensesTab> {
     };
     await _guard(context, () async {
       if (e == null) {
-        await _db.from('expenses').insert(row);
+        await AppDb.from('expenses').insert(row);
       } else {
-        await _db.from('expenses').update(row).eq('id', e['id']);
+        await AppDb.from('expenses').update(row).eq('id', e['id']);
       }
     });
     _load();
@@ -582,7 +582,7 @@ class _SuppliersTabState extends State<_SuppliersTab> {
                             ),
                           );
                           if (go != true || !context.mounted) return;
-                          await _guard(context, () => _db.from('supplier_payments').delete().eq('id', p['id']));
+                          await _guard(context, () => AppDb.from('supplier_payments').delete().eq('id', p['id']));
                           _load();
                         }),
                   ),
